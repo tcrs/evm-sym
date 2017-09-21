@@ -10,6 +10,8 @@ StorageSort = z3.ArraySort(z3.BitVecSort(256), z3.BitVecSort(256))
 MemoryEmpty = z3.K(z3.BitVecSort(256), z3.BitVecVal(0, 8))
 StorageEmpty = z3.K(z3.BitVecSort(256), z3.BitVecVal(0, 256))
 
+sha3 = z3.Function('sha3', MemorySort, z3.BitVecSort(256))
+
 class CFGNode:
     def __init__(self, parent=None, predicates=[], pc=0):
         self.start_pc = pc
@@ -185,7 +187,12 @@ def run_block(env, s, solver, log_trace=False):
             s.stack.append(z3.BitVecVal(s.code.size(), 256))
         elif name == 'SHA3':
             start, sz = getargs(ins)
-            raise NotImplementedError(name)
+            v = MemoryEmpty
+            n = as_concrete(sz)
+            for i in range(n):
+                v = z3.Store(v, i, z3.Select(s.memory, start + i))
+            s.stack.append(sha3(v))
+            # TODO when n == 0 or all values are concrete, simplify!
             #start, sz = as_concrete(start), as_concrete(sz)
             #stack.append(utils.sha3_256([as_concrete(
         elif name in {'CALLER', 'ADDRESS', 'ORIGIN', 'CALLVALUE', 'CALLDATASIZE', 'GASPRICE', 'COINBASE', 'TIMESTAMP', 'NUMBER', 'DIFFICULTY', 'GASLIMIT'}:
