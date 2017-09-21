@@ -224,6 +224,7 @@ def reachable(root, root_env, env, filterfn):
 def try_reach(targets, root, root_env, envstack):
     solver = z3.Solver()
     unreached_targets = []
+    gadgets = []
     for target in targets:
         gadgets = list(reachable(root, root_env, envstack[-1], lambda t: t.end_type in {'call', 'stop'} and t.storage is not root_env.initial_storage()))
         solver.push()
