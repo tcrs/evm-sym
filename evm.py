@@ -94,6 +94,10 @@ class Environment:
         return z3.Const('ISTORAGE<{}>'.format(self.name), StorageSort)
 
     @cached
+    def initial_gas(self):
+        return z3.Int('INITIALGAS<{}>'.format(self.name))
+
+    @cached
     def initial_callstack_depth(self):
         return z3.BitVec('ICSDEPTH<{}>'.format(self.name), 256)
 

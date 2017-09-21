@@ -18,6 +18,7 @@ class CFGNode:
             self.code = None
             self.stack = []
             self.memory = MemoryEmpty
+            self.gas = None
         else:
             # These members will represent the state at the end of the current
             # block.
@@ -25,6 +26,7 @@ class CFGNode:
             self.stack = copy.copy(parent.stack)
             self.memory = parent.memory
             self.storage = parent.storage
+            self.gas = parent.gas
         self.predicates = predicates
         self.parent = parent
         self.successors = []
@@ -102,6 +104,11 @@ def run_block(env, s, solver, log_trace=False):
             s.stack.append(fn(*getargs(ins)))
 
         oplen = 1
+
+        # TODO Proper gas accounting!
+        # Some instructions have variable gas costs
+        # pyethereum gas field we're using here is not the latest mainnet values
+        s.gas = s.gas - gas
 
         ## Execute instruction
         # TODO
@@ -339,7 +346,7 @@ def get_cfg(code, env, print_trace=False):
 
         if successors:
             for preds, nextpc in successors:
-                child = CFGNode(parent=node, pc=nextpc, predicates=preds)
+                child = CFGNode(parent=node, pc=nextpc, predicates=preds + [node.gas > 0])
                 node.successors.append(child)
 
                 solver.push()
@@ -351,5 +358,6 @@ def get_cfg(code, env, print_trace=False):
     root = CFGNode(pc=0)
     root.code = code
     root.storage = env.initial_storage()
+    root.gas = env.initial_gas()
 
     return rectrace(root, z3.Solver())
