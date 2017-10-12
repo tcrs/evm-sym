@@ -341,7 +341,7 @@ def run_block(env, s, solver, log_trace=False):
             print('< {}'.format([z3.simplify(x) for x in s.stack]))
         s.pc += oplen
 
-def get_cfg(code, env, print_trace=False):
+def get_cfg(env, print_trace=False):
     def rectrace(node, solver):
         successors = run_block(env, node, solver, log_trace=print_trace)
 
@@ -363,7 +363,7 @@ def get_cfg(code, env, print_trace=False):
         return node
 
     root = CFGNode(pc=0)
-    root.code = code
+    root.code = env.code
     root.storage = env.initial_storage()
     root.gas = env.initial_gas()
 

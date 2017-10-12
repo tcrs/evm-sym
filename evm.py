@@ -26,8 +26,9 @@ def cached(fn):
     return wrapper
 
 class Environment:
-    def __init__(self, name, **kwargs):
+    def __init__(self, name, code, **kwargs):
         self.name = name
+        self.code = code
         self._cache = {}
         for name, val in kwargs.items():
             assert hasattr(self, name), name
@@ -278,19 +279,19 @@ def main(argv):
         code = open(args.code, 'r').read()
     code = Code(utils.parse_as_bin(code.rstrip()))
 
-    base_env = Environment('base')
-    root = symevm.vm.get_cfg(code, base_env, print_trace=args.trace)
+    base_env = Environment('base', code)
+    root = symevm.vm.get_cfg(base_env, print_trace=args.trace)
     if args.cfg:
-        poss_env = Environment('t', caller=z3.BitVecVal(args.caller, 256), initial_storage=StorageEmpty)
+        poss_env = Environment('t', code, caller=z3.BitVecVal(args.caller, 256), initial_storage=StorageEmpty)
         symevm.vm.cfg_to_dot(code, root, base_env, poss_env, z3.Solver())
     else:
         interestingfn = lambda t: t.end_type in {'call', 'suicide', 'stop'}
         gadgetsfn = lambda t: t.end_type in {'call', 'stop'} and t.modified_storage is not None
 
-        poss_env = Environment('t', caller=z3.BitVecVal(args.caller, 256))
+        poss_env = Environment('t', code, caller=z3.BitVecVal(args.caller, 256))
         poss_reachable = list(reachable(root, base_env, poss_env, interestingfn))
 
-        env0 = Environment('0', caller=z3.BitVecVal(args.caller, 256), initial_storage=StorageEmpty)
+        env0 = Environment('0', code, caller=z3.BitVecVal(args.caller, 256), initial_storage=StorageEmpty)
 
         unreachable = try_reach(poss_reachable, root, base_env, [env0])
         for node in unreachable:
