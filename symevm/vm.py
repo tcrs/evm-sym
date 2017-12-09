@@ -12,29 +12,67 @@ StorageEmpty = z3.K(z3.BitVecSort(256), z3.BitVecVal(0, 256))
 
 sha3 = z3.Function('sha3', MemorySort, z3.BitVecSort(256))
 
+ContractState = collections.namedtuple('ContractState', 'code storage')
+
+ReturnInfo = collections.namedtuple('ReturnInfo', 'call_node new_pc retdata_start retdata_sz retresult')
+CallInfo = collections.namedtuple('CallInfo', 'calldata_mem calldata_off calldata_sz')
+
 class CFGNode:
-    def __init__(self, parent=None, predicates=[], pc=0):
+    def __init__(self, global_state, transaction, parent=None, predicates=[], pc=0):
         self.start_pc = pc
         self.pc = pc
+        self.transaction = transaction
+        # TODO Avoid copying this around every time - only copy on write
+        self.global_state = copy.copy(global_state)
         if parent is None:
             self.code = None
             self.stack = []
+            self.callstack = []
             self.memory = MemoryEmpty
+            self.storage = None
             self.gas = None
+            self.callinfo = None
         else:
             # These members will represent the state at the end of the current
             # block.
             self.code = parent.code
             self.stack = copy.copy(parent.stack)
+            self.callstack = copy.copy(parent.callstack)
             self.memory = parent.memory
             self.storage = parent.storage
             self.gas = parent.gas
+            self.callinfo = parent.callinfo
         self.predicates = predicates
         self.parent = parent
         self.successors = []
         # Why the block finished here
         self.end_type = None
         self.end_info = None
+
+    def make_child_branch(self, new_pc, preds):
+        n = CFGNode(self.global_state, self.transaction, parent=self, pc=new_pc, predicates = preds)
+        self.successors.append(n)
+        return n
+
+    def make_child_call(self, addr, gas, value, callinfo, retinfo):
+        info = self.global_state[addr]
+        n = CFGNode(self.global_state, self.transaction);
+        n.parent = self
+        n.code = info.code
+        n.storage = info.storage
+        n.callstack = self.callstack + [retinfo]
+        n.gas = gas
+        n.callinfo = callinfo
+        self.successors.append(n)
+        return n
+
+    def make_child_return(self, retdata_off, retdata_sz):
+        retinfo = self.callstack[-1]
+        n = CFGNode(self.global_state, self.transaction, parent=retinfo.call_node, pc=retinfo.new_pc)
+        n.parent = self
+        # TODO copy return data into appropriate place in n.memory
+        self.successors.append(n)
+        return n
 
     def __str__(self):
         return 'CFGNode({}:{}, end_type={})'.format(self.start_pc, self.pc, self.end_type)
@@ -50,7 +88,7 @@ def cfg_to_dot(code, root, root_env=None, check_env=None, solver=None):
             else:
                 colour = 'red'
 
-        print('{}[color={},label="{}"];'.format(blockname, colour, '\\n'.join(util.disassemble(code, t.start_pc, t.pc))))
+        print('{}[color={},label="{}"];'.format(blockname, colour, '\\n'.join(util.disassemble(t.code, t.start_pc, t.pc))))
         for i, succ in enumerate(t.successors):
             sname = blockname + '_' + str(i)
             recprint(succ, sname)
@@ -77,7 +115,10 @@ def get_byte(v, bi):
 def _bool_to_01(bv):
     return z3.If(bv, z3.BitVecVal(1, 256), z3.BitVecVal(0, 256))
 
-def run_block(env, s, solver, log_trace=False):
+SuccessorInternal = collections.namedtuple('SuccessorInternal', 'new_pc preds')
+SuccessorCall = collections.namedtuple('SuccessorCall', 'addr gas value callinfo retinfo')
+
+def run_block(s, solver, log_trace=False):
     def getargs(n):
         return [s.stack.pop() for i in range(n)]
 
@@ -85,9 +126,6 @@ def run_block(env, s, solver, log_trace=False):
         s.end_type = reason
         s.end_info = args
         pass
-
-    def make_succ(new_pc, preds):
-        return (preds, new_pc)
 
     while True:
         op = s.code[s.pc]
@@ -196,9 +234,9 @@ def run_block(env, s, solver, log_trace=False):
             #start, sz = as_concrete(start), as_concrete(sz)
             #stack.append(utils.sha3_256([as_concrete(
         elif name in {'CALLER', 'ADDRESS', 'ORIGIN', 'CALLVALUE', 'CALLDATASIZE', 'GASPRICE', 'COINBASE', 'TIMESTAMP', 'NUMBER', 'DIFFICULTY', 'GASLIMIT'}:
-            reducestack(getattr(env, name.lower()))
+            reducestack(getattr(s.transaction, name.lower()))
         elif name in {'BALANCE', 'BLOCKHASH', 'EXTCODESIZE'}:
-            reducestack(lambda x: (getattr(env, name.lower())())(x))
+            reducestack(lambda x: (getattr(s.transaction, name.lower())())(x))
         elif name == 'CODECOPY':
             start_mem, start_code, sz = getargs(ins)
             start_code = as_concrete(start_code)
@@ -206,11 +244,16 @@ def run_block(env, s, solver, log_trace=False):
                 s.memory = z3.Store(s.memory, start_mem + i, s.code[start_code + i])
         elif name == 'CALLDATACOPY':
             src, dest, sz = getargs(ins)
+            cd_mem, cd_off, cd_sz = s.callinfo
             for i in range(sz.as_long()):
-                s.memory = z3.Store(s.memory, dest + i, z3.Select(env.calldata(), src + i))
+                # TOOD: out of range == 0?
+                cd_val = z3.If(src + i < cd_sz, z3.Select(cd_mem, cd_off + src + i), 0)
+                s.memory = z3.Store(s.memory, dest + i, cd_val)
         elif name == 'CALLDATALOAD':
             args = getargs(ins)
-            s.stack.append(z3.simplify(z3.Concat(*[z3.Select(env.calldata(), args[0] + i) for i in range(32)])))
+            cd_mem, cd_off, cd_sz = s.callinfo
+            s.stack.append(z3.simplify(z3.Concat(
+                *[z3.If(args[0] + i < cd_sz, z3.Select(cd_mem, cd_off + args[0] + i), 0) for i in range(32)])))
         elif name == 'POP':
             getargs(ins)
             pass
@@ -239,31 +282,30 @@ def run_block(env, s, solver, log_trace=False):
             end_trace('stop')
             return []
         elif name == 'RETURN':
-            # TODO ACTUALLY HANDLE THIS PROPERLY!!
-            end_trace('return')
-            return []
-        #elif name == 'RETURN':
-        #    ret_start, ret_size = getargs(ins)
-        #    ret_info = s.callstack.pop()
-        #    size = min(ret_size, ret_info.out_size)
-        #    off = start.as_long()
-        #    ret_state = ret_info.state
-        #    for i in range(size.as_long()):
-        #        ret_state.memory = z3,Store(ret_state.memory, ret_info.out_off + i,
-        #            z3.Select(memory, off + i))
-        #    raise NotImplementedError()
+            ret_start, ret_size = getargs(ins)
+            ret_info = s.callstack[-1]
+            # TODO copy return data
+            #size = min(ret_size, ret_info.out_size)
+            #off = start.as_long()
+            #ret_state = ret_info.state
+            #for i in range(size.as_long()):
+            #    ret_state.memory = z3,Store(ret_state.memory, ret_info.out_off + i,
+            #        z3.Select(memory, off + i))
+            return [ret_info]
         elif name == 'CALL':
             successors = []
             # TODO pass value through to calls
             gas, call_addr, value, in_off, in_sz, out_off, out_sz = getargs(ins)
+            callres = z3.BitVec(name, 256)
+            s.stack.append(callres)
             if is_concrete(call_addr):
-                raise NotImplementedError('concrete call')
+                return [SuccessorCall(addr=call_addr.as_long(), gas=gas, value=value,
+                    retinfo=ReturnInfo(s, s.pc + 1, out_off, out_sz, callres),
+                    callinfo=CallInfo(s.memory, in_off, in_sz))]
             else:
                 end_trace('call', call_addr, value, gas)
                 name = '{}:CALL({})'.format(s.pc, z3.simplify(call_addr))
-                callres = z3.BitVec(name, 256)
-                s.stack.append(callres)
-                return [make_succ(s.pc + 1, [z3.Or(callres == 1, callres == 0)])]
+                return [SuccessorInternal(s.pc + 1, [z3.Or(callres == 1, callres == 0)])]
 
         #elif name == 'CALLCODE':
         #    raise NotImplementedError()
@@ -275,7 +317,7 @@ def run_block(env, s, solver, log_trace=False):
             res = z3.BitVec(name, 256)
             s.stack.append(res)
             end_trace('create', value)
-            return [make_succ(s.pc + 1, [z3.Or(res == 0, res == 1)])]
+            return [SuccessorInternal(s.pc + 1, [z3.Or(res == 0, res == 1)])]
         elif name == 'SUICIDE':
             to_addr = getargs(ins)
             end_trace('suicide', to_addr)
@@ -292,7 +334,7 @@ def run_block(env, s, solver, log_trace=False):
             fallthrough_state = None
             if solver.check() == z3.sat:
                 # Also might not take the jump
-                fallthrough_state = make_succ(s.pc + 1, [cond == 0])
+                fallthrough_state = SuccessorInternal(s.pc + 1, [cond == 0])
                 successors.append(fallthrough_state)
             solver.pop()
 
@@ -301,16 +343,16 @@ def run_block(env, s, solver, log_trace=False):
             if solver.check() == z3.sat:
                 # OK, can take the jump
                 if is_concrete(loc):
-                    if fallthrough_state and loc == fallthrough_state[1]:
-                        fallthrough_state[0][-1] = z3.Or(cond == 0, cond != 1)
+                    if fallthrough_state and loc == fallthrough_state.new_pc:
+                        fallthrough_state.preds[-1] = z3.Or(cond == 0, cond != 1)
                     else:
-                        successors.append(make_succ(loc.as_long(), [cond != 0]))
+                        successors.append(SuccessorInternal(loc.as_long(), [cond != 0]))
                 else:
                     for dest in s.code.all_jumpdests():
                         solver.push()
                         solver.add(loc == dest)
                         if solver.check() == z3.sat:
-                            successors.append(make_succ(dest, [cond != 0, loc == dest]))
+                            successors.append(SuccessorInternal(dest, [cond != 0, loc == dest]))
                         solver.pop()
             solver.pop()
             return successors
@@ -318,14 +360,14 @@ def run_block(env, s, solver, log_trace=False):
             end_trace(None)
             (loc,) = getargs(ins)
             if is_concrete(loc):
-                return [make_succ(loc.as_long(), [])]
+                return [SuccessorInternal(loc.as_long(), [])]
             else:
                 successors = []
                 for dest in s.code.all_jumpdests():
                     solver.push()
                     solver.add(loc == dest)
                     if solver.check() == z3.sat:
-                        successors.append(make_succ(dest, [loc == dest]))
+                        successors.append(SuccessorInternal(dest, [loc == dest]))
                     solver.pop()
                 # No fallthrough
                 return successors
@@ -341,30 +383,40 @@ def run_block(env, s, solver, log_trace=False):
             print('< {}'.format([z3.simplify(x) for x in s.stack]))
         s.pc += oplen
 
-def get_cfg(env, print_trace=False):
+def get_cfg(global_state, transaction, print_trace=True):
     def rectrace(node, solver):
-        successors = run_block(env, node, solver, log_trace=print_trace)
+        successors = run_block(node, solver, log_trace=print_trace)
 
         if print_trace:
-            for preds, nextpc in successors:
-                print('{} => {}'.format(z3.simplify(z3.And(*preds)), nextpc))
+            for succ in successors:
+                if isinstance(succ, SuccessorInternal):
+                    print('{} => {}'.format(z3.simplify(z3.And(*succ.preds)), succ.new_pc))
             if len(successors) == 0 and print_trace:
                 print('------------------ END OF THIS TRACE ------------')
 
         if successors:
-            for preds, nextpc in successors:
-                child = CFGNode(parent=node, pc=nextpc, predicates=preds + [node.gas > 0])
-                node.successors.append(child)
+            for succ in successors:
+                if isinstance(succ, SuccessorInternal):
+                    child = node.make_child_branch(new_pc = succ.new_pc, preds = succ.preds + [node.gas > 0])
+                elif isinstance(succ, SuccessorCall):
+                    child = node.make_child_call(addr = succ.addr, value=succ.value, gas=succ.gas, retinfo=succ.retinfo, callinfo=succ.callinfo)
+                elif isinstance(succ, ReturnInfo):
+                    child = node.make_child_return(0, 0)
+                else:
+                    raise ValueError(succ)
 
                 solver.push()
-                solver.add(*preds)
+                solver.add(*child.predicates)
                 rectrace(child, solver)
                 solver.pop()
         return node
 
-    root = CFGNode(pc=0)
-    root.code = env.code
-    root.storage = env.initial_storage()
-    root.gas = env.initial_gas()
+    contract_state = global_state[transaction.address()]
+
+    root = CFGNode(global_state, transaction)
+    root.code = contract_state.code
+    root.storage = contract_state.storage
+    root.gas = transaction.initial_gas()
+    root.callinfo = CallInfo(transaction.calldata(), 0, transaction.calldatasize())
 
     return rectrace(root, z3.Solver())

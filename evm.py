@@ -5,6 +5,7 @@ import argparse
 import collections
 from ethereum import opcodes, utils
 import symevm.vm, symevm.util
+import assemble
 
 MemorySort = z3.ArraySort(z3.BitVecSort(256), z3.BitVecSort(8))
 StorageSort = z3.ArraySort(z3.BitVecSort(256), z3.BitVecSort(256))
@@ -25,14 +26,99 @@ def cached(fn):
         return self._cache[fn.__name__]
     return wrapper
 
-class Environment:
-    def __init__(self, name, code, **kwargs):
-        self.name = name
-        self.code = code
+# Global State:
+#   address -> (code, storage)
+#
+# Transaction State:
+#   block num, gas price, etc...
+#
+# Call State:
+#   address, calldata/size, callstack depth
+#
+# CFG Node:
+#   updated global state (storage)
+#   stack, memory, gas, pc
+
+class StateCache:
+    def __init__(self, **kwargs):
         self._cache = {}
         for name, val in kwargs.items():
             assert hasattr(self, name), name
             self._cache[name] = val
+
+class TransactionState(StateCache):
+    def __init__(self, name, address, **kwargs):
+        StateCache.__init__(self, **kwargs)
+        self.name = name
+        self._address = address
+
+    def address(self):
+        return self._address
+
+    @cached
+    def gasprice(self):
+        return z3.BitVec('GASPRICE<{}>'.format(self.name), 256)
+
+    @cached
+    def extcodesize(self):
+        return z3.Function('EXTCODESIZE<{}>'.format(self.name), z3.BitVecSort(256), z3.BitVecSort(256))
+
+    @cached
+    def blockhash(self):
+        return z3.Function('BLOCKHASH<{}>'.format(self.name), z3.BitVecSort(256), z3.BitVecSort(256))
+
+    @cached
+    def coinbase(self):
+        return z3.BitVec('COINBASE<{}>'.format(self.name), 256)
+
+    @cached
+    def timestamp(self):
+        return z3.BitVec('TIMESTAMP<{}>'.format(self.name), 256)
+
+    @cached
+    def number(self):
+        return z3.BitVec('NUMBER<{}>'.format(self.name), 256)
+
+    @cached
+    def difficulty(self):
+        return z3.BitVec('DIFFICULTY<{}>'.format(self.name), 256)
+
+    @cached
+    def gaslimit(self):
+        return z3.BitVec('GASLIMIT<{}>'.format(self.name), 256)
+
+    @cached
+    def initial_gas(self):
+        return z3.Int('INITIALGAS<{}>'.format(self.name))
+
+    @cached
+    def initial_callstack_depth(self):
+        return z3.BitVec('ICSDEPTH<{}>'.format(self.name), 256)
+
+    @cached
+    def balance(self):
+        return z3.Function('BALANCE<{}>'.format(self.name), z3.BitVecSort(256), z3.BitVecSort(256))
+
+    @cached
+    def caller(self):
+        return z3.BitVec('CALLER<{}>'.format(self.name), 256)
+
+    @cached
+    def callvalue(self):
+        return z3.BitVec('CALLVALUE<{}>'.format(self.name), 256)
+
+    @cached
+    def calldata(self):
+        return z3.Const('CALLDATA<{}>'.format(self.name), MemorySort)
+
+    @cached
+    def calldatasize(self):
+        return z3.BitVec('CALLDATASIZE<{}>'.format(self.name), 256)
+
+class Environment(StateCache):
+    def __init__(self, name, **kwargs):
+        StateCache.__init__(self, **kwargs)
+        self.name = name
 
     # Differs from z3.substitute in that it can substitute functions (which is
     # required as a few of the environment things are functions). Modified
@@ -95,72 +181,12 @@ class Environment:
         return z3.Const('ISTORAGE<{}>'.format(self.name), StorageSort)
 
     @cached
-    def initial_gas(self):
-        return z3.Int('INITIALGAS<{}>'.format(self.name))
-
-    @cached
-    def initial_callstack_depth(self):
-        return z3.BitVec('ICSDEPTH<{}>'.format(self.name), 256)
-
-    @cached
     def address(self):
         return z3.BitVec('ADDRESS<{}>'.format(self.name), 256)
 
     @cached
-    def balance(self):
-        return z3.Function('BALANCE<{}>'.format(self.name), z3.BitVecSort(256), z3.BitVecSort(256))
-
-    @cached
-    def caller(self):
-        return z3.BitVec('CALLER<{}>'.format(self.name), 256)
-
-    @cached
-    def callvalue(self):
-        return z3.BitVec('CALLVALUE<{}>'.format(self.name), 256)
-
-    @cached
-    def calldata(self):
-        return z3.Const('CALLDATA<{}>'.format(self.name), MemorySort)
-
-    @cached
-    def calldatasize(self):
-        return z3.BitVec('CALLDATASIZE<{}>'.format(self.name), 256)
-
-    @cached
     def codesize(self):
         return z3.BitVec('CODESIZE<{}>'.format(self.name), 256)
-
-    @cached
-    def gasprice(self):
-        return z3.BitVec('GASPRICE<{}>'.format(self.name), 256)
-
-    @cached
-    def extcodesize(self):
-        return z3.Function('EXTCODESIZE<{}>'.format(self.name), z3.BitVecSort(256), z3.BitVecSort(256))
-
-    @cached
-    def blockhash(self):
-        return z3.Function('BLOCKHASH<{}>'.format(self.name), z3.BitVecSort(256), z3.BitVecSort(256))
-
-    @cached
-    def coinbase(self):
-        return z3.BitVec('COINBASE<{}>'.format(self.name), 256)
-
-    @cached
-    def timestamp(self):
-        return z3.BitVec('TIMESTAMP<{}>'.format(self.name), 256)
-
-    @cached
-    def number(self):
-        return z3.BitVec('NUMBER<{}>'.format(self.name), 256)
-
-    @cached
-    def difficulty(self):
-        return z3.BitVec('DIFFICULTY<{}>'.format(self.name), 256)
-
-    @cached
-    def gaslimit(self):
-        return z3.BitVec('GASLIMIT<{}>'.format(self.name), 256)
 
 
 class Code:
@@ -264,6 +290,30 @@ def add_args(parser):
     parser.add_argument('--trace', action='store_true', help='Output verbose trace of execution')
     parser.add_argument('--caller', type=lambda x: int(x, 0), help='CALLER instruction return value')
 
+def named_storage(name):
+    return z3.Const('Storage<{}>'.format(name), StorageSort)
+
+contract1 = [
+    '0 SLOAD',
+    '1 ADD',
+    '0 SSTORE',
+    '0 CALLDATALOAD',
+    'DUP1 @finish JUMPI',
+    '0 0 0 0 0 0x1235 77 CALL',
+    '=finish STOP']
+
+contract2 = [
+    '1 0 MSTORE',
+    '0 0 32 0 0 0x1234 75 CALL'
+    ]
+
+test_global_state = {
+    #0x1234: symevm.vm.ContractState(Code(assemble.assemble(['0 0 0 0 0 0x1235 77 CALL 1 1 SSTORE STOP'])), named_storage('0x1234')),
+    0x1234: symevm.vm.ContractState(Code(assemble.assemble(contract1)), named_storage('0x1234')),
+    #0x1235: symevm.vm.ContractState(Code(assemble.assemble(['0 0 0 0 0 0x1234 75 CALL'])), named_storage('0x1235')),
+    0x1235: symevm.vm.ContractState(Code(assemble.assemble(contract2)), named_storage('0x1235')),
+}
+
 def main(argv):
     p = argparse.ArgumentParser()
     add_args(p)
@@ -279,11 +329,18 @@ def main(argv):
         code = open(args.code, 'r').read()
     code = Code(utils.parse_as_bin(code.rstrip()))
 
-    base_env = Environment('base', code)
-    root = symevm.vm.get_cfg(base_env, print_trace=args.trace)
+    global_state = test_global_state
+   # {
+   #     1234: symevm.vm.ContractState(code, z3.Const('Storage<1234>', StorageSort)),
+   # }
+
+    #base_env = Environment('base', address=0x1234)
+    base_t = TransactionState('base', 0x1234)
+    root = symevm.vm.get_cfg(global_state, base_t, print_trace=args.trace)
     if args.cfg:
-        poss_env = Environment('t', code, caller=z3.BitVecVal(args.caller, 256), initial_storage=StorageEmpty)
-        symevm.vm.cfg_to_dot(code, root, base_env, poss_env, z3.Solver())
+        #poss_env = Environment('t', code, address=1234, caller=z3.BitVecVal(args.caller, 256), initial_storage=StorageEmpty)
+        #symevm.vm.cfg_to_dot(code, root, base_env, poss_env, z3.Solver())
+        symevm.vm.cfg_to_dot(code, root)
     else:
         interestingfn = lambda t: t.end_type in {'call', 'suicide', 'stop'}
         gadgetsfn = lambda t: t.end_type in {'call', 'stop'} and t.modified_storage is not None

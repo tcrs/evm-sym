@@ -19,63 +19,77 @@ class Ref:
 class Label:
     __slots__ = ('name', 'size', 'refs', 'push')
     def __init__(self, name):
-        self.name, self.refs, self.size, self.push = name, [], 2, b''
+        self.name, self.refs, self.size, self.push = name, [], 2, []
 
-code = []
-labels = {}
+class Assembler:
+    def __init__(self, lines=[]):
+        self.code = []
+        self.labels = {}
+        for line in lines:
+            self.add_line(line)
 
-# Read asm input:
-#  - Each line is whitespace split into words
-#  - numbers are translated into push of appropriate size
-#  - =<word> is a jump dest
-#  - @<word> is a reference to a jump dest
-with open(sys.argv[1], 'r') as f:
-    for line in f:
+    #  - Each line is whitespace split into words
+    #  - numbers are translated into push of appropriate size
+    #  - =<word> is a jump dest
+    #  - @<word> is a reference to a jump dest
+    def add_line(self, line):
         line = line.strip()
         for word in line.split(' '):
             try:
                 v = int(word, 0)
-                code.extend(pushbytes(v))
+                pb = pushbytes(v)
+                self.code.extend(pb)
             except ValueError:
                 if word[0] == '=':
-                    code.append(labels.setdefault(word[1:], Label(word[1:])))
+                    self.code.append(self.labels.setdefault(word[1:], Label(word[1:])))
                 elif word[0] == '@':
-                    v = labels.setdefault(word[1:], Label(word[1:]))
+                    v = self.labels.setdefault(word[1:], Label(word[1:]))
                     ref = Ref(v)
                     v.refs.append(ref)
-                    code.append(ref)
+                    self.code.append(ref)
                 else:
                     op = opcodes.reverse_opcodes[word.upper()]
-                    code.append(op)
+                    self.code.append(op)
 
-# Size all jump dest pushes (iterative)
-# Jump dest pushes are sized based on the length in bytes of the jump
-# destination address, which can change depending on the size of the pushes in
-# code before it, so may have to go round this loop a few times...
-while 1:
-    loc = 0
-    for b in code:
-        if isinstance(b, Ref):
-            loc += b.label.size
-        else:
-            if isinstance(b, Label):
-                pb = pushbytes(loc)
-                if len(pb) != b.size:
-                    b.size = len(pb)
-                    # Retry with new size
-                    break
+    def assemble(self):
+        # Size all jump dest pushes (iterative)
+        # Jump dest pushes are sized based on the length in bytes of the jump
+        # destination address, which can change depending on the size of the pushes in
+        # code before it, so may have to go round this loop a few times...
+        while 1:
+            loc = 0
+            for b in self.code:
+                if isinstance(b, Ref):
+                    loc += b.label.size
                 else:
-                    b.push = ''.join('{:02x}'.format(x) for x in pb)
-            loc += 1
-    else:
-        break
+                    if isinstance(b, Label):
+                        b.push = pushbytes(loc)
+                        if len(b.push) != b.size:
+                            b.size = len(b.push)
+                            # Retry with new size
+                            break
+                    loc += 1
+            else:
+                break
 
-# Write out code as a big hex string
-for b in code:
-    if isinstance(b, Label):
-        # JUMPDEST
-        sys.stdout.write('5b')
-    elif isinstance(b, Ref):
-        sys.stdout.write(b.label.push)
-    else:
+        for b in self.code:
+            if isinstance(b, Label):
+                # JUMPDEST
+                yield 0x5b
+            elif isinstance(b, Ref):
+                yield from b.label.push
+            else:
+                yield b
+
+def assemble(code):
+    return bytes(Assembler(code).assemble())
+
+if __name__ == '__main__':
+    asm = Assembler()
+    with open(sys.argv[1], 'r') as f:
+        for line in f:
+            asm.add_line(line)
+
+    # Write code out as a single big hex string
+    for b in asm.assemble():
         sys.stdout.write('{:02x}'.format(b))
