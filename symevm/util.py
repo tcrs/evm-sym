@@ -7,7 +7,7 @@ def oplen(op):
     else:
         return 1
 
-def disassemble(code, start_pc, max_pc):
+def disassemble(code, start_pc, max_pc, pc_hex=False):
     assert start_pc <= max_pc
     pc = start_pc
     while pc <= max_pc:
@@ -15,11 +15,14 @@ def disassemble(code, start_pc, max_pc):
         try:
             name, *_ = opcodes.opcodes[op]
         except KeyError:
-            name = hex(pc) + ':INVALID(' + hex(op) + ')'
+            name = 'INVALID(' + hex(op) + ')'
         if name.startswith('PUSH'):
             npush = op - 0x60 + 1
             # TODO supposed to get zeros if some bytes >= len(inp)
             yield hex(utils.big_endian_to_int(code[pc+1:pc+npush+1]))
         else:
-            yield str(pc) + ':' + name
+            if pc_hex:
+                yield hex(pc) + ':' + name
+            else:
+                yield str(pc) + ':' + name
         pc += oplen(op)
