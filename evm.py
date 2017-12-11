@@ -291,20 +291,21 @@ def add_args(parser):
     parser.add_argument('--caller', type=lambda x: int(x, 0), help='CALLER instruction return value')
 
 def named_storage(name):
-    return z3.Const('Storage<{}>'.format(name), StorageSort)
+    #return z3.Const('Storage<{}>'.format(name), StorageSort)
+    return StorageEmpty
 
 contract1 = [
     '0 SLOAD',
-    '1 ADD',
-    '0 SSTORE',
-    '0 CALLDATALOAD',
-    'DUP1 @finish JUMPI',
-    '0 0 0 0 0 0x1235 77 CALL',
-    '=finish STOP']
+    '@finish JUMPI',
+    '1 0 SSTORE',
+    '1 0 0 0 0 0x1235 77 CALL',
+    '0 0 SSTORE',
+    '=finish 1 0 RETURN']
 
 contract2 = [
-    '1 0 MSTORE',
-    '0 0 32 0 0 0x1234 75 CALL'
+    '1 0 MSTORE8',
+    '1 1 1 0 0 0x1234 75 CALL',
+    '1 1 RETURN',
     ]
 
 test_global_state = {
