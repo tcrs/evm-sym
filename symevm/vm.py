@@ -427,13 +427,31 @@ def run_block(s, solver, log_trace=False):
             print('< ' + ';; '.join(str(z3.simplify(x)) for x in s.stack))
         s.pc += oplen
 
+def print_coverage(addr, cov):
+    max_pc = max(e for _, e in cov.keys())
+    rep = ['.'] * (max_pc + 1)
+    for (start, end), v in cov.items():
+        if v:
+            c = str(v) if v <= 9 else '!'
+            rep[start:end] = [c] * (end - start)
+    print('0x{:x}: {}'.format(addr, ''.join(rep)))
+
 def get_cfg(global_state, transaction, print_trace=True):
+    coverage = {}
     def rectrace(node, solver):
         try:
             run_block(node, solver, log_trace=print_trace)
         except IndexError:
             node.end_type = 'stack error'
             node.end_info = []
+
+        #coverage.setdefault(node.addr, collections.defaultdict(int))
+        #coverage[node.addr][(0, node.code.size())] = 0
+        #coverage[node.addr][(node.start_pc, node.pc)] += 1
+        #print()
+        #for addr, cov in coverage.items():
+        #    print_coverage(addr, cov)
+        #print('ran 0x{:x}:0x{:x}'.format(node.start_pc, node.pc))
 
         if print_trace:
             for succ in node.successors:
