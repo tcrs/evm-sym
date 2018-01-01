@@ -330,10 +330,11 @@ def main(argv):
         code = open(args.code, 'r').read()
     code = Code(utils.parse_as_bin(code.rstrip()))
 
-    global_state = test_global_state
-   # {
-   #     1234: symevm.vm.ContractState(code, z3.Const('Storage<1234>', StorageSort)),
-   # }
+    #global_state = test_global_state
+    global_state = {
+        #0x1234: symevm.vm.ContractState(code, z3.Const('Storage<1234>', StorageSort)),
+        0x1234: symevm.vm.ContractState(code, StorageEmpty),
+    }
 
     #base_env = Environment('base', address=0x1234)
     base_t = TransactionState('base', 0x1234)
