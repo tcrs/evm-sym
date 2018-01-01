@@ -160,7 +160,7 @@ def run_block(s, solver, log_trace=False):
             name, ins, outs, gas = opcodes.opcodes[op]
         except KeyError:
             end_trace('invalid')
-            return []
+            return
 
         if log_trace:
             print('{:04}: {}'.format(s.pc, name))
@@ -408,8 +408,8 @@ def run_block(s, solver, log_trace=False):
                     if solver.check() == z3.sat:
                         s.make_child_branch(new_pc = dest, preds=[s.gas > 0, loc == dest])
                     solver.pop()
-                # No fallthrough
-                return
+            # No fallthrough
+            return
         elif name == 'JUMPDEST':
             pass
         elif name in {'LOG0', 'LOG1', 'LOG2', 'LOG3', 'LOG4'}:
