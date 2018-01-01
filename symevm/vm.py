@@ -105,9 +105,9 @@ def cfg_to_dot(code, root, root_env=None, check_env=None, solver=None):
 
         #print('subgraph x{:x} {{'.format(t.addr))
         #print('label="0x{:x}";'.format(t.addr))
-        print('{}[color={},label="0x{:x}\n{}"];'.format(blockname, colour, t.addr, '\\n'.join(util.disassemble(t.code, t.start_pc, t.pc))))
+        print('{}[color={},label="@@ 0x{:x} @@\n{}"];'.format(blockname, colour, t.addr, '\\n'.join(util.disassemble(t.code, t.start_pc, t.pc))))
         #print('}')
-        if hasattr(t, 'retdata_off'):
+        if hasattr(t, 'retdata_off') and is_concrete(t.retdata_sz):
             retlabel = ', '.join(str(z3.simplify(z3.Select(t.memory, t.retdata_off + i)))
                 for i in range(t.retdata_sz.as_long()))
         else:
@@ -164,7 +164,7 @@ def run_block(s, solver, log_trace=False):
 
         if log_trace:
             print('{:04}: {}'.format(s.pc, name))
-            print('> {}'.format([z3.simplify(x) for x in s.stack]))
+            print('> ' + ';; '.join(str(z3.simplify(x)) for x in s.stack))
             #print('> {} | {} | {}'.format(stack, mem, store))
 
         def reducestack(fn):
@@ -424,7 +424,7 @@ def run_block(s, solver, log_trace=False):
             raise NotImplementedError(name)
 
         if log_trace:
-            print('< {}'.format([z3.simplify(x) for x in s.stack]))
+            print('< ' + ';; '.join(str(z3.simplify(x)) for x in s.stack))
         s.pc += oplen
 
 def get_cfg(global_state, transaction, print_trace=True):
