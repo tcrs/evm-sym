@@ -88,16 +88,16 @@ class TransactionState(StateCache):
         return z3.BitVec('GASLIMIT<{}>'.format(self.name), 256)
 
     @cached
+    def balance(self):
+        return z3.Function('BALANCE<{}>'.format(self.name), z3.BitVecSort(256), z3.BitVecSort(256))
+
+    @cached
     def initial_gas(self):
         return z3.Int('INITIALGAS<{}>'.format(self.name))
 
     @cached
     def initial_callstack_depth(self):
         return z3.BitVec('ICSDEPTH<{}>'.format(self.name), 256)
-
-    @cached
-    def balance(self):
-        return z3.Function('BALANCE<{}>'.format(self.name), z3.BitVecSort(256), z3.BitVecSort(256))
 
     @cached
     def caller(self):

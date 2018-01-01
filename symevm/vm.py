@@ -15,7 +15,7 @@ sha3 = z3.Function('sha3', MemorySort, z3.BitVecSort(256))
 ContractState = collections.namedtuple('ContractState', 'code storage')
 
 ReturnInfo = collections.namedtuple('ReturnInfo', 'call_node new_pc retdata_start retdata_sz retresult')
-CallInfo = collections.namedtuple('CallInfo', 'calldata_mem calldata_off calldata_sz')
+CallInfo = collections.namedtuple('CallInfo', 'calldata_mem calldata_off calldata_sz gas value')
 
 class CFGNode:
     def __init__(self, global_state, transaction, parent=None, predicates=[], pc=0):
@@ -56,7 +56,7 @@ class CFGNode:
         self.successors.append(n)
         return n
 
-    def make_child_call(self, addr, gas, value, callinfo, retinfo):
+    def make_child_call(self, addr, callinfo, retinfo):
         #print(z3.simplify(self.memory))
         n = CFGNode(self.global_state, self.transaction);
         # Put current storage for current contract into global state so that it
@@ -67,7 +67,7 @@ class CFGNode:
         n.code = info.code
         n.storage = info.storage
         n.callstack = self.callstack + [retinfo]
-        n.gas = gas
+        n.gas = callinfo.gas
         n.callinfo = callinfo
         n.addr = addr
         self.successors.append(n)
@@ -260,10 +260,20 @@ def run_block(s, solver, log_trace=False):
             # TODO when n == 0 or all values are concrete, simplify!
             #start, sz = as_concrete(start), as_concrete(sz)
             #stack.append(utils.sha3_256([as_concrete(
-        elif name in {'CALLER', 'ADDRESS', 'ORIGIN', 'CALLVALUE', 'CALLDATASIZE', 'GASPRICE', 'COINBASE', 'TIMESTAMP', 'NUMBER', 'DIFFICULTY', 'GASLIMIT'}:
+        elif name in {'GASPRICE', 'COINBASE', 'TIMESTAMP', 'NUMBER', 'DIFFICULTY', 'GASLIMIT'}:
             reducestack(getattr(s.transaction, name.lower()))
         elif name in {'BALANCE', 'BLOCKHASH', 'EXTCODESIZE'}:
             reducestack(lambda x: (getattr(s.transaction, name.lower())())(x))
+        elif name == 'ADDRESS':
+            s.stack.append(s.addr)
+        elif name == 'CALLVALUE':
+            s.stack.append(s.callinfo.value)
+        elif name == 'CALLDATASIZE':
+            s.stack.append(s.callinfo.calldata_sz)
+        elif name == 'CALLER':
+            NotImplemented
+        elif name == 'ORIGIN':
+            NotImplemented
         elif name == 'CODECOPY':
             start_mem, start_code, sz = getargs(ins)
             start_code = as_concrete(start_code)
@@ -278,7 +288,7 @@ def run_block(s, solver, log_trace=False):
                 s.memory = z3.Store(s.memory, dest + i, cd_val)
         elif name == 'CALLDATALOAD':
             args = getargs(ins)
-            cd_mem, cd_off, cd_sz = s.callinfo
+            cd_mem, cd_off, cd_sz, *_ = s.callinfo
             s.stack.append(z3.simplify(z3.Concat(
                 *[z3.If(args[0] + i < cd_sz, z3.Select(cd_mem, cd_off + args[0] + i), 0) for i in range(32)])))
         elif name == 'POP':
@@ -317,9 +327,9 @@ def run_block(s, solver, log_trace=False):
             callres = z3.BitVec(name, 256)
             s.stack.append(callres)
             if is_concrete(call_addr):
-                s.make_child_call(addr = call_addr.as_long(), gas = gas, value = value,
+                s.make_child_call(addr = call_addr.as_long(),
                     retinfo=ReturnInfo(s, s.pc + 1, out_off, out_sz, callres),
-                    callinfo=CallInfo(s.memory, in_off, in_sz))
+                    callinfo=CallInfo(s.memory, in_off, in_sz, gas, value))
                 return
             else:
                 end_trace('call', call_addr, value, gas)
@@ -435,7 +445,8 @@ def get_cfg(global_state, transaction, print_trace=True):
     root.code = contract_state.code
     root.storage = contract_state.storage
     root.gas = transaction.initial_gas()
-    root.callinfo = CallInfo(transaction.calldata(), 0, transaction.calldatasize())
+    root.callinfo = CallInfo(transaction.calldata(), 0, transaction.calldatasize(),
+        transaction.initial_gas(), transaction.callvalue())
     root.addr = transaction.address()
 
     return rectrace(root, z3.Solver())
