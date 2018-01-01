@@ -322,6 +322,11 @@ def run_block(s, solver, log_trace=False):
             ret_start, ret_size = getargs(ins)
             s.make_child_return(ret_start, ret_size);
             return
+        elif name == 'REVERT':
+            end_trace('revert')
+            # TODO: like return but callres == 1 and global state changes are
+            # reverted, remaining gas is refunded
+            return
         elif name == 'CALL':
             gas, call_addr, value, in_off, in_sz, out_off, out_sz = getargs(ins)
             callres = z3.BitVec(name, 256)
