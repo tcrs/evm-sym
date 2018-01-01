@@ -429,7 +429,11 @@ def run_block(s, solver, log_trace=False):
 
 def get_cfg(global_state, transaction, print_trace=True):
     def rectrace(node, solver):
-        run_block(node, solver, log_trace=print_trace)
+        try:
+            run_block(node, solver, log_trace=print_trace)
+        except IndexError:
+            node.end_type = 'stack error'
+            node.end_info = []
 
         if print_trace:
             for succ in node.successors:
