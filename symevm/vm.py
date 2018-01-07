@@ -89,7 +89,7 @@ class CFGNode:
             # TODO handle non-concrete sizes?
             for i in range(min(retdata_sz.as_long(), retinfo.retdata_sz.as_long())):
                 n.memory = z3.Store(n.memory, retinfo.retdata_start + i, z3.Select(self.memory, retdata_off + i))
-            n.retdata = MemRange(self.memory, retinfo.retdata_start, retinfo.retdata_end)
+            n.retdata = MemRange(self.memory, retinfo.retdata_start, retinfo.retdata_sz)
             self.successors.append(n)
             return n
 
@@ -340,7 +340,7 @@ def run_block(s, solver, log_trace=False):
             callres = z3.BitVec(name, 256)
             s.stack.append(callres)
             if is_concrete(call_addr):
-                s.make_child_call(addr = call_addr.as_long(), code_addr=code_addr, caller=caller,
+                s.make_child_call(addr = call_addr.as_long(), code_addr=code_addr.as_long(), caller=caller,
                     retinfo=ReturnInfo(s, s.pc + 1, out_off, out_sz, callres),
                     callinfo=CallInfo(MemRange(s.memory, in_off, in_sz), gas, value))
                 return

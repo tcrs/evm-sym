@@ -11,7 +11,7 @@ def print_coverage(addr, cov):
             rep[start:end] = [c] * (end - start)
     print('0x{:x}: {}'.format(addr, ''.join(rep)))
 
-def get_cfg(global_state, transaction, print_trace=True):
+def get_cfg(global_state, transaction, print_trace=True, verbose_coverage=True):
     coverage = {}
     def rectrace(node, solver, covered_jumpdests):
         try:
@@ -20,13 +20,14 @@ def get_cfg(global_state, transaction, print_trace=True):
             node.end_type = 'stack error'
             node.end_info = []
 
-        coverage.setdefault(node.addr, collections.defaultdict(int))
-        coverage[node.addr][(0, node.code.size())] = 0
-        coverage[node.addr][(node.start_pc, node.pc)] += 1
-        print()
-        for addr, cov in coverage.items():
-            print_coverage(addr, cov)
-        print('ran 0x{:x}:0x{:x}'.format(node.start_pc, node.pc))
+        if verbose_coverage:
+            coverage.setdefault(node.addr, collections.defaultdict(int))
+            coverage[node.addr][(0, node.code.size())] = 0
+            coverage[node.addr][(node.start_pc, node.pc)] += 1
+            print()
+            for addr, cov in coverage.items():
+                print_coverage(addr, cov)
+            print('ran 0x{:x}:0x{:x}'.format(node.start_pc, node.pc))
 
         if print_trace:
             for succ in node.successors:
@@ -72,7 +73,7 @@ def to_dot(code, root, root_env=None, check_env=None, solver=None):
         #print('label="0x{:x}";'.format(t.addr))
         print('{}[color={},label="@@ 0x{:x} @@\n{}"];'.format(blockname, colour, t.addr, '\\n'.join(util.disassemble(t.code, t.start_pc, t.pc))))
         #print('}')
-        if hasattr(t, 'retdata_off') and is_concrete(t.retdata_sz):
+        if hasattr(t, 'retdata_off') and vm.is_concrete(t.retdata_sz):
             retlabel = ', '.join(str(z3.simplify(z3.Select(t.memory, t.retdata_off + i)))
                 for i in range(t.retdata_sz.as_long()))
         else:
