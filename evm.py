@@ -4,7 +4,7 @@ import copy
 import argparse
 import collections
 from ethereum import opcodes, utils
-import symevm.vm, symevm.util
+import symevm.vm, symevm.util, symevm.bb, symevm.cfg, symevm.state
 import assemble
 
 MemorySort = z3.ArraySort(z3.BitVecSort(256), z3.BitVecSort(8))
@@ -26,18 +26,6 @@ def cached(fn):
         return self._cache[fn.__name__]
     return wrapper
 
-# Global State:
-#   address -> (code, storage)
-#
-# Transaction State:
-#   block num, gas price, etc...
-#
-# Call State:
-#   address, calldata/size, callstack depth
-#
-# CFG Node:
-#   updated global state (storage)
-#   stack, memory, gas, pc
 
 class StateCache:
     def __init__(self, **kwargs):
@@ -45,75 +33,6 @@ class StateCache:
         for name, val in kwargs.items():
             assert hasattr(self, name), name
             self._cache[name] = val
-
-class TransactionState(StateCache):
-    def __init__(self, name, address, **kwargs):
-        StateCache.__init__(self, **kwargs)
-        self.name = name
-        self._address = address
-
-    def address(self):
-        return self._address
-
-    @cached
-    def gasprice(self):
-        return z3.BitVec('GASPRICE<{}>'.format(self.name), 256)
-
-    @cached
-    def extcodesize(self):
-        return z3.Function('EXTCODESIZE<{}>'.format(self.name), z3.BitVecSort(256), z3.BitVecSort(256))
-
-    @cached
-    def blockhash(self):
-        return z3.Function('BLOCKHASH<{}>'.format(self.name), z3.BitVecSort(256), z3.BitVecSort(256))
-
-    @cached
-    def coinbase(self):
-        return z3.BitVec('COINBASE<{}>'.format(self.name), 256)
-
-    @cached
-    def timestamp(self):
-        return z3.BitVec('TIMESTAMP<{}>'.format(self.name), 256)
-
-    @cached
-    def number(self):
-        return z3.BitVec('NUMBER<{}>'.format(self.name), 256)
-
-    @cached
-    def difficulty(self):
-        return z3.BitVec('DIFFICULTY<{}>'.format(self.name), 256)
-
-    @cached
-    def gaslimit(self):
-        return z3.BitVec('GASLIMIT<{}>'.format(self.name), 256)
-
-    @cached
-    def balance(self):
-        return z3.Function('BALANCE<{}>'.format(self.name), z3.BitVecSort(256), z3.BitVecSort(256))
-
-    @cached
-    def initial_gas(self):
-        return z3.Int('INITIALGAS<{}>'.format(self.name))
-
-    @cached
-    def initial_callstack_depth(self):
-        return z3.BitVec('ICSDEPTH<{}>'.format(self.name), 256)
-
-    @cached
-    def caller(self):
-        return z3.BitVec('CALLER<{}>'.format(self.name), 256)
-
-    @cached
-    def callvalue(self):
-        return z3.BitVec('CALLVALUE<{}>'.format(self.name), 256)
-
-    @cached
-    def calldata(self):
-        return z3.Const('CALLDATA<{}>'.format(self.name), MemorySort)
-
-    @cached
-    def calldatasize(self):
-        return z3.BitVec('CALLDATASIZE<{}>'.format(self.name), 256)
 
 class Environment(StateCache):
     def __init__(self, name, **kwargs):
@@ -328,21 +247,23 @@ def main(argv):
         code = sys.stdin.read()
     else:
         code = open(args.code, 'r').read()
-    code = Code(utils.parse_as_bin(code.rstrip()))
+    code = utils.parse_as_bin(code.rstrip())
+
+    code = Code(code)
 
     #global_state = test_global_state
     global_state = {
-        #0x1234: symevm.vm.ContractState(code, z3.Const('Storage<1234>', StorageSort)),
-        0x1234: symevm.vm.ContractState(code, StorageEmpty),
+        0x1234: symevm.vm.ContractState(code, z3.Const('Storage<1234>', StorageSort)),
+        #0x1234: symevm.vm.ContractState(code, StorageEmpty),
     }
 
     #base_env = Environment('base', address=0x1234)
-    base_t = TransactionState('base', 0x1234)
-    root = symevm.vm.get_cfg(global_state, base_t, print_trace=args.trace)
+    base_t = symevm.state.TransactionState('base', 0x1234)
+    root = symevm.cfg.get_cfg(global_state, base_t, print_trace=args.trace)
     if args.cfg:
         #poss_env = Environment('t', code, address=1234, caller=z3.BitVecVal(args.caller, 256), initial_storage=StorageEmpty)
         #symevm.vm.cfg_to_dot(code, root, base_env, poss_env, z3.Solver())
-        symevm.vm.cfg_to_dot(code, root)
+        symevm.cfg.to_dot(code, root)
     else:
         interestingfn = lambda t: t.end_type in {'call', 'suicide', 'stop'}
         gadgetsfn = lambda t: t.end_type in {'call', 'stop'} and t.modified_storage is not None
