@@ -45,6 +45,9 @@ def get_cfg(global_state, transaction, print_trace=True, verbose_coverage=True):
                 solver.pop()
         return node
 
+    if global_state[transaction.address()].storage is None:
+        global_state[transaction.address()] = global_state[transaction.address()]._replace(storage=transaction.initial_storage(transaction.address()))
+
     contract_state = global_state[transaction.address()]
 
     root = vm.CFGNode(global_state, transaction)

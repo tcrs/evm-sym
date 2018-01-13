@@ -13,6 +13,7 @@ StorageEmpty = z3.K(z3.BitVecSort(256), z3.BitVecVal(0, 256))
 sha3 = z3.Function('sha3', MemorySort, z3.BitVecSort(256))
 
 ContractState = collections.namedtuple('ContractState', 'code storage')
+ContractState.__new__.__defaults__ = (None,)
 
 MemRange = collections.namedtuple('MemRange', 'mem offset size')
 
@@ -68,6 +69,8 @@ class CFGNode:
         n.parent = self
         n.code = n.global_state[code_addr].code
         n.storage = n.global_state[addr].storage
+        if n.storage is None:
+            n.storage = self.transaction.initial_storage(n.addr)
         n.callstack = self.callstack + [retinfo]
         n.gas = callinfo.gas
         n.callinfo = callinfo

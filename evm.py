@@ -4,7 +4,7 @@ import copy
 import argparse
 import collections
 from ethereum import opcodes, utils
-import symevm.vm, symevm.util, symevm.bb, symevm.cfg, symevm.state
+import symevm.vm, symevm.util, symevm.bb, symevm.cfg, symevm.state, symevm.code
 import assemble
 
 MemorySort = z3.ArraySort(z3.BitVecSort(256), z3.BitVecSort(8))
@@ -18,119 +18,6 @@ def memory_any():
 
 def storage_any():
     return z3.Const('storage', StorageSort)
-
-def cached(fn):
-    def wrapper(self, *args):
-        if fn.__name__ not in self._cache:
-            self._cache[fn.__name__] = fn(self, *args)
-        return self._cache[fn.__name__]
-    return wrapper
-
-
-class StateCache:
-    def __init__(self, **kwargs):
-        self._cache = {}
-        for name, val in kwargs.items():
-            assert hasattr(self, name), name
-            self._cache[name] = val
-
-class Environment(StateCache):
-    def __init__(self, name, **kwargs):
-        StateCache.__init__(self, **kwargs)
-        self.name = name
-
-    # Differs from z3.substitute in that it can substitute functions (which is
-    # required as a few of the environment things are functions). Modified
-    # version of python code from:
-    # https://stackoverflow.com/questions/15236450/substituting-function-symbols-in-z3-formulas
-    # also based somewhat on the z3 substitute implementation:
-    # https://github.com/Z3Prover/z3/blob/master/src/ast/rewriter/expr_safe_replace.cpp
-    def substitute(self, other, expr):
-        cache = z3.AstMap(ctx=expr.ctx)
-
-        fnsubs = []
-        for k, v in self._cache.items():
-            if z3.is_app(v) and v.num_args() > 0:
-                fnsubs.append((v, getattr(other, k)()))
-            else:
-                cache[v] = getattr(other, k)()
-
-        todo = [expr]
-        while todo:
-            n = todo[-1]
-            if n in cache:
-                todo.pop()
-            elif z3.is_var(n):
-                cache[n] = n
-                todo.pop()
-            elif z3.is_app(n):
-                new_args = []
-                for i in range(n.num_args()):
-                    arg = n.arg(i)
-                    if arg not in cache:
-                        todo.append(arg)
-                    else:
-                        new_args.append(cache[arg])
-                # Only actually do the substitution if all the arguments have
-                # already been processed
-                if len(new_args) == n.num_args():
-                    todo.pop()
-                    fn = n.decl()
-                    for oldfn, newfn in fnsubs:
-                        if z3.eq(fn, oldfn):
-                            new_fn = z3.substitute_vars(newfn, *new_args)
-                            break
-                    else:
-                        # TODO only if new_args != old_args
-                        new_fn = fn(new_args)
-                    cache[n] = new_fn
-            else:
-                assert z3.is_quantifier(n)
-                # Not currently implemented as don't use quanitifers at the
-                # moment
-                raise NotImplementedError()
-        return cache[expr]
-
-
-    def get_substitutions(self, other):
-        return [(v, getattr(other, k)()) for k, v in self._cache.items()]
-
-    @cached
-    def initial_storage(self):
-        return z3.Const('ISTORAGE<{}>'.format(self.name), StorageSort)
-
-    @cached
-    def address(self):
-        return z3.BitVec('ADDRESS<{}>'.format(self.name), 256)
-
-    @cached
-    def codesize(self):
-        return z3.BitVec('CODESIZE<{}>'.format(self.name), 256)
-
-
-class Code:
-    def __init__(self, code):
-        self._code = code
-        self._jumpdests = []
-        i = 0
-        while i < len(code):
-            if code[i] == 0x5b:
-                self._jumpdests.append(i)
-            i += symevm.util.oplen(code[i])
-
-    def size(self):
-        return len(self._code)
-
-    def __getitem__(self, x):
-        if isinstance(x, slice):
-            return self._code[x]
-        elif x >= len(self._code):
-            return 0
-        else:
-            return self._code[x]
-
-    def all_jumpdests(self):
-        return self._jumpdests
 
 def print_trace(t, prefix=''):
     print('{}{}{}:{}'.format(prefix, (t.end_type + ' ') if t.end_type is not None else '', t.pcs, t.predicates))
@@ -228,10 +115,10 @@ contract2 = [
     ]
 
 test_global_state = {
-    #0x1234: symevm.vm.ContractState(Code(assemble.assemble(['0 0 0 0 0 0x1235 77 CALL 1 1 SSTORE STOP'])), named_storage('0x1234')),
-    0x1234: symevm.vm.ContractState(Code(assemble.assemble(contract1)), named_storage('0x1234')),
-    #0x1235: symevm.vm.ContractState(Code(assemble.assemble(['0 0 0 0 0 0x1234 75 CALL'])), named_storage('0x1235')),
-    0x1235: symevm.vm.ContractState(Code(assemble.assemble(contract2)), named_storage('0x1235')),
+    #0x1234: symevm.vm.ContractState(symevm.code.Code(assemble.assemble(['0 0 0 0 0 0x1235 77 CALL 1 1 SSTORE STOP'])), named_storage('0x1234')),
+    0x1234: symevm.vm.ContractState(symevm.code.Code(assemble.assemble(contract1)), named_storage('0x1234')),
+    #0x1235: symevm.vm.ContractState(symevm.code.Code(assemble.assemble(['0 0 0 0 0 0x1234 75 CALL'])), named_storage('0x1235')),
+    0x1235: symevm.vm.ContractState(symevm.code.Code(assemble.assemble(contract2)), named_storage('0x1235')),
 }
 
 def main(argv):
@@ -249,21 +136,28 @@ def main(argv):
         code = open(args.code, 'r').read()
     code = utils.parse_as_bin(code.rstrip())
 
-    code = Code(code)
+    code = symevm.code.Code(code)
 
     #global_state = test_global_state
     global_state = {
-        0x1234: symevm.vm.ContractState(code, z3.Const('Storage<1234>', StorageSort)),
+        0x1234: symevm.vm.ContractState(code),
         #0x1234: symevm.vm.ContractState(code, StorageEmpty),
     }
 
-    #base_env = Environment('base', address=0x1234)
-    base_t = symevm.state.TransactionState('base', 0x1234)
+    # TODO
+    # - HANDLE LOOPS!!! Probably helped by limiting max gas
+    # - limit initial_gas <= block gas limit
+    # - Maintain address:value mapping in global state
+
+    base_t = symevm.state.TransactionState('base', 0x1234, initial_storage_policy=symevm.state.storage_any_policy)
     root = symevm.cfg.get_cfg(global_state, base_t, print_trace=args.trace)
     if args.cfg:
+        poss_state = symevm.state.TransactionState('t', 0x1234, caller=z3.BitVecVal(args.caller, 256),
+            initial_storage_policy=symevm.state.storage_empty_policy,
+            origin=z3.BitVecVal(args.caller, 256))
         #poss_env = Environment('t', code, address=1234, caller=z3.BitVecVal(args.caller, 256), initial_storage=StorageEmpty)
-        #symevm.vm.cfg_to_dot(code, root, base_env, poss_env, z3.Solver())
-        symevm.cfg.to_dot(code, root)
+        symevm.cfg.to_dot(code, root, base_t, poss_state, z3.Solver())
+        #symevm.cfg.to_dot(code, root)
     else:
         interestingfn = lambda t: t.end_type in {'call', 'suicide', 'stop'}
         gadgetsfn = lambda t: t.end_type in {'call', 'stop'} and t.modified_storage is not None
