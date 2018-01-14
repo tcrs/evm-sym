@@ -198,11 +198,11 @@ def run_block(s, solver, log_trace=False):
             # TODO args[1] == 0
             reducestack(lambda x, y: z3.If(y == 0, z3.BitVecVal(0, 256), z3.SRem(x, y)))
         elif name == 'ADDMOD':
-            # TODO intermediate add not modulo 256 (need wider types)
-            reducestack(lambda x, y, z: z3.If(z == 0, z3.BitVecVal(0, 256), z3.URem(x + y, z)))
+            reducestack(lambda x, y, z: z3.If(z == 0, z3.BitVecVal(0, 256),
+                z3.Extract(255, 0, z3.URem(z3.ZeroExt(1, x) + z3.ZeroExt(1, y), z3.ZeroExt(1, z)))))
         elif name == 'MULMOD':
-            # TODO intermediate mul not modulo 256 (need wider types)
-            reducestack(lambda x, y, z: z3.If(z == 0, z3.BitVecVal(0, 256), z3.URem(x + y, z)))
+            reducestack(lambda x, y, z: z3.If(z == 0, z3.BitVecVal(0, 256),
+                z3.Extract(255, 0, z3.URem(z3.ZeroExt(256, x) * z3.ZeroExt(256, y), z3.ZeroExt(256, z)))))
         elif name == 'EXP':
             # TODO z3 currently doesn't seem to provide __pow__ on BitVecs?
             reducestack(lambda x, y: z3.BitVecVal(x.as_long() ** y.as_long(), 256))
