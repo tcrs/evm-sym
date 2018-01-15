@@ -18,6 +18,51 @@ def dict_to_storage(items, base=symevm.state.StorageEmpty):
         s = z3.Store(s, z3.BitVecVal(int(k, 0), 256), z3.BitVecVal(int(v, 0), 256))
     return s
 
+def mem_from_str(text, base=symevm.state.MemoryEmpty):
+    b = utils.parse_as_bin(text)
+    m = base
+    for i, v in enumerate(b):
+        m = z3.Store(m, z3.BitVecVal(i, 256), z3.BitVecVal(v, 8))
+    return m, len(b)
+
+def get_state(items):
+    state = {}
+    for addr, info in items.items():
+        unknown_keys = set(info.keys()) - {'balance', 'code', 'nonce', 'storage'}
+        if unknown_keys:
+            raise NotImplementedError('Unknown contract state keys ' + str(unknown_keys))
+        balance = int(info['balance'], 0)
+        nonce = int(info['nonce'], 0)
+        storage = dict_to_storage(info['storage'])
+        code = symevm.code.Code(utils.parse_as_bin(info['code']))
+        state[addr] = symevm.state.ContractState(code=code, storage=storage, balance=balance, nonce=nonce)
+    return state
+
+def get_transaction_info(test):
+    env_translate = dict(
+        currentCoinbase='coinbase',
+        currentDifficulty='difficulty',
+        currentGasLimit='gaslimit',
+        currentNumber='number',
+        currentTimestamp='timestamp')
+    tstate = {}
+    for k, v in test['env'].items():
+        tstate[env_translate[k]] = z3.BitVecVal(int(v, 0), 256)
+
+    exec_translate = dict(
+        gasPrice = 'gasprice',
+        value = 'callvalue',
+        caller = 'caller',
+        gas = 'initial_gas')
+    for k, v in test['exec'].items():
+        if k in exec_translate:
+            tstate[exec_translate[k]] = z3.BitVecVal(int(v, 0), 256)
+
+    code = symevm.code.Code(utils.parse_as_bin(test['exec']['code']))
+    tstate['calldata'], tstate['calldatasize'] = mem_from_str(test['exec']['data'])
+
+    return code, tstate
+
 def get_cfg_leaves(leaves, node):
     if not node.successors:
         leaves.append(node)
@@ -28,19 +73,12 @@ def get_cfg_leaves(leaves, node):
 def run_test(args, name, test):
     print(name)
 
-    state = {}
-    storages = {}
-    for addr, info in test['pre'].items():
-        addr = int(addr, 0)
-        storages[addr] = dict_to_storage(info['storage'])
-        state[addr] = symevm.vm.ContractState(symevm.code.Code(utils.parse_as_bin(info['code'])))
-
-    code = symevm.code.Code(utils.parse_as_bin(test['exec']['code']))
+    global_state = get_state(test['pre'])
     addr = int(test['exec']['address'], 0)
+    code, tstate = get_transaction_info(test)
 
-    ts = symevm.state.TransactionState('base', addr,
-        initial_storage_policy=symevm.state.storage_specified_policy(storages, symevm.state.storage_empty_policy))
-    root = symevm.cfg.get_cfg(state, ts, print_trace=args.trace, verbose_coverage=False)
+    ts = symevm.state.TransactionState('base', addr, global_state, **tstate)
+    root = symevm.cfg.get_cfg(code, ts, print_trace=args.trace, verbose_coverage=False)
     if args.cfg:
         symevm.cfg.to_dot(code, root)
     leaves = []

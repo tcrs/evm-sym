@@ -116,9 +116,9 @@ contract2 = [
 
 test_global_state = {
     #0x1234: symevm.vm.ContractState(symevm.code.Code(assemble.assemble(['0 0 0 0 0 0x1235 77 CALL 1 1 SSTORE STOP'])), named_storage('0x1234')),
-    0x1234: symevm.vm.ContractState(symevm.code.Code(assemble.assemble(contract1)), named_storage('0x1234')),
+    0x1234: symevm.state.ContractState(symevm.code.Code(assemble.assemble(contract1)), named_storage('0x1234')),
     #0x1235: symevm.vm.ContractState(symevm.code.Code(assemble.assemble(['0 0 0 0 0 0x1234 75 CALL'])), named_storage('0x1235')),
-    0x1235: symevm.vm.ContractState(symevm.code.Code(assemble.assemble(contract2)), named_storage('0x1235')),
+    0x1235: symevm.state.ContractState(symevm.code.Code(assemble.assemble(contract2)), named_storage('0x1235')),
 }
 
 def main(argv):
@@ -140,7 +140,7 @@ def main(argv):
 
     #global_state = test_global_state
     global_state = {
-        0x1234: symevm.vm.ContractState(code),
+        0x1234: symevm.state.ContractState(code),
         #0x1234: symevm.vm.ContractState(code, StorageEmpty),
     }
 
@@ -149,10 +149,10 @@ def main(argv):
     # - limit initial_gas <= block gas limit
     # - Maintain address:value mapping in global state
 
-    base_t = symevm.state.TransactionState('base', 0x1234, initial_storage_policy=symevm.state.storage_any_policy)
-    root = symevm.cfg.get_cfg(global_state, base_t, print_trace=args.trace)
+    base_t = symevm.state.TransactionState('base', 0x1234, global_state, initial_storage_policy=symevm.state.storage_any_policy)
+    root = symevm.cfg.get_cfg(code, base_t, print_trace=args.trace)
     if args.cfg:
-        poss_state = symevm.state.TransactionState('t', 0x1234, caller=z3.BitVecVal(args.caller, 256),
+        poss_state = symevm.state.TransactionState('t', 0x1234, global_state, caller=z3.BitVecVal(args.caller, 256),
             initial_storage_policy=symevm.state.storage_empty_policy,
             origin=z3.BitVecVal(args.caller, 256))
         #poss_env = Environment('t', code, address=1234, caller=z3.BitVecVal(args.caller, 256), initial_storage=StorageEmpty)

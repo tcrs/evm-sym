@@ -12,9 +12,6 @@ StorageEmpty = z3.K(z3.BitVecSort(256), z3.BitVecVal(0, 256))
 
 sha3 = z3.Function('sha3', MemorySort, z3.BitVecSort(256))
 
-ContractState = collections.namedtuple('ContractState', 'code storage')
-ContractState.__new__.__defaults__ = (None,)
-
 MemRange = collections.namedtuple('MemRange', 'mem offset size')
 
 ReturnInfo = collections.namedtuple('ReturnInfo', 'call_node new_pc retdata_start retdata_sz retresult')
@@ -34,6 +31,7 @@ class CFGNode:
             self.callstack = []
             self.memory = MemoryEmpty
             self.storage = None
+            self.balance = None
             self.gas = None
             self.callinfo = None
             self.addr = None
@@ -45,6 +43,7 @@ class CFGNode:
             self.callstack = parent.callstack
             self.memory = parent.memory
             self.storage = parent.storage
+            self.balance = parent.balance
             self.gas = parent.gas
             self.callinfo = parent.callinfo
             self.addr = parent.addr
@@ -56,6 +55,11 @@ class CFGNode:
         self.end_type = None
         self.end_info = None
 
+    def get_contract_state(self, addr):
+        if addr not in self.global_state:
+            self.global_state[addr] = self.transaction.initial_contract_state(addr)
+        return self.global_state[addr]
+
     def make_child_branch(self, new_pc, preds):
         n = CFGNode(self.global_state, self.transaction, parent=self, pc=new_pc, predicates = preds)
         self.successors.append(n)
@@ -65,12 +69,12 @@ class CFGNode:
         n = CFGNode(self.global_state, self.transaction);
         # Put current storage for current contract into global state so that it
         # is correctly picked up for re-entrant calls
-        n.global_state[self.addr] = n.global_state[self.addr]._replace(storage=self.storage)
+        n.global_state[self.addr] = n.global_state[self.addr]._replace(storage=self.storage, balance=s.balance - callinfo.value)
         n.parent = self
         n.code = n.global_state[code_addr].code
-        n.storage = n.global_state[addr].storage
-        if n.storage is None:
-            n.storage = self.transaction.initial_storage(n.addr)
+        child_s = self.get_contract_state(addr)
+        n.storage = child_s.storage
+        n.balance = child_s.balance + callinfo.value
         n.callstack = self.callstack + [retinfo]
         n.gas = callinfo.gas
         n.callinfo = callinfo
@@ -85,8 +89,9 @@ class CFGNode:
         if self.callstack:
             retinfo = self.callstack[-1]
             n = CFGNode(self.global_state, self.transaction, parent=retinfo.call_node, pc=retinfo.new_pc)
-            n.global_state[self.addr] = n.global_state[self.addr]._replace(storage = self.storage)
+            n.global_state[self.addr] = n.global_state[self.addr]._replace(storage=self.storage, balance=self.balance)
             n.storage = n.global_state[n.addr].storage
+            n.balance = n.global_state[n.addr].balance
             n.parent = self
             n.predicates.append(retinfo.retresult == 1)
             # TODO handle non-concrete sizes?
@@ -103,6 +108,7 @@ class CFGNode:
             # Note: rollback global state to before CALL
             n = CFGNode(retinfo.call_node.global_state, self.transaction, parent=retinfo.call_node, pc=retinfo.new_pc)
             n.storage = n.global_state[n.addr].storage
+            n.balance = n.global_state[n.addr].balance
             n.parent = self
             # Note: return 0
             n.predicates.append(retinfo.retresult == 0)

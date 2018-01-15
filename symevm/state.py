@@ -1,10 +1,14 @@
 import z3
+import collections
 
 MemorySort = z3.ArraySort(z3.BitVecSort(256), z3.BitVecSort(8))
 StorageSort = z3.ArraySort(z3.BitVecSort(256), z3.BitVecSort(256))
 
 MemoryEmpty = z3.K(z3.BitVecSort(256), z3.BitVecVal(0, 8))
 StorageEmpty = z3.K(z3.BitVecSort(256), z3.BitVecVal(0, 256))
+
+ContractState = collections.namedtuple('ContractState', 'code storage balance nonce')
+ContractState.__new__.__defaults__ = (None, None, None)
 
 def cached(fn):
     def wrapper(self, *args):
@@ -19,25 +23,34 @@ def storage_empty_policy(name, addr):
 def storage_any_policy(name, addr):
     return z3.Const('Storage<{}:{:x}>'.format(name, addr), StorageSort)
 
-def storage_specified_policy(storages, sub_policy):
-    def policy(name, addr):
-        if addr in storages:
-            return storages[addr]
-        else:
-            return sub_policy(name, addr)
-    return policy
+def balance_zero_policy(name, addr):
+    return z3.BitVecVal(0, 256)
+
+def balance_any_policy(name, addr):
+    return z3.Const('Balance<{}:{:x}>'.format(name, addr), z3.BitVecSort(256))
+
+def nonce_zero_policy(name, addr):
+    return z3.BitVecVal(0, 256)
+
+def nonce_any_policy(name, addr):
+    return z3.Const('Nonce<{}:{:x}>'.format(name, addr), z3.BitVecSort(256))
 
 class TransactionState:
-    def __init__(self, name, address, initial_storage_policy=storage_empty_policy, **kwargs):
+    def __init__(self, name, address, global_state, initial_storage_policy=storage_empty_policy, initial_balance_policy=balance_zero_policy, initial_nonce_policy=nonce_zero_policy, **kwargs):
+        self.name = name
         self._cache = {}
         for name, val in kwargs.items():
             assert hasattr(self, name), name
             self._cache[name] = val
 
-        self.name = name
         self._address = address
         self._storage_policy = initial_storage_policy
-        self._initial_storage = {}
+        self._nonce_policy = initial_nonce_policy
+        self._balance_policy = initial_balance_policy
+        self._global_state = global_state
+        # Copy of states in global_state, with None parts filled in by policies
+        # on demand (i.e. only requested states will end up in here)
+        self._expanded_global_state = {}
 
     # Differs from z3.substitute in that it can substitute functions (which is
     # required as a few of the environment things are functions). Modified
@@ -48,8 +61,11 @@ class TransactionState:
     def substitute(self, other, expr):
         cache = z3.AstMap(ctx=expr.ctx)
 
-        for k, v in self._initial_storage.items():
-            cache[v] = other.initial_storage(k)
+        for addr, state in self._expanded_global_state.items():
+            other_state = other.initial_contract_state(addr)
+            cache[state.storage] = other_state.storage
+            cache[state.balance] = other_state.balance
+            cache[state.nonce] = other_state.nonce
 
         fnsubs = []
         for k, v in self._cache.items():
@@ -145,10 +161,17 @@ class TransactionState:
     def initial_callstack_depth(self):
         return z3.BitVec('ICSDEPTH<{}>'.format(self.name), 256)
 
-    def initial_storage(self, addr):
-        if addr not in self._initial_storage:
-            self._initial_storage[addr] = self._storage_policy(self.name, addr)
-        return self._initial_storage[addr]
+    def initial_contract_state(self, addr):
+        if addr not in self._expanded_global_state:
+            cs = self._global_state.get(addr, ContractState(None))
+            if cs.storage is None:
+                cs = cs._replace(storage = self._storage_policy(self.name, addr))
+            if cs.balance is None:
+                cs = cs._replace(balance = self._balance_policy(self.name, addr))
+            if cs.nonce is None:
+                cs = cs._replace(nonce = self._nonce_policy(self.name, addr))
+            self._expanded_global_state[addr] = cs
+        return self._expanded_global_state[addr]
 
     @cached
     def caller(self):

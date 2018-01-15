@@ -11,7 +11,7 @@ def print_coverage(addr, cov):
             rep[start:end] = [c] * (end - start)
     print('0x{:x}: {}'.format(addr, ''.join(rep)))
 
-def get_cfg(global_state, transaction, print_trace=True, verbose_coverage=True):
+def get_cfg(code, transaction, print_trace=True, verbose_coverage=True):
     coverage = {}
     def rectrace(node, solver, covered_jumpdests):
         try:
@@ -45,13 +45,11 @@ def get_cfg(global_state, transaction, print_trace=True, verbose_coverage=True):
                 solver.pop()
         return node
 
-    if global_state[transaction.address()].storage is None:
-        global_state[transaction.address()] = global_state[transaction.address()]._replace(storage=transaction.initial_storage(transaction.address()))
+    contract_state = transaction.initial_contract_state(transaction.address())
 
-    contract_state = global_state[transaction.address()]
-
-    root = vm.CFGNode(global_state, transaction)
-    root.code = contract_state.code
+    root = vm.CFGNode({transaction.address(): contract_state}, transaction)
+    # Note: allow executing code which is not from contract transaction.address()
+    root.code = code
     root.storage = contract_state.storage
     root.gas = transaction.initial_gas()
     root.callinfo = vm.CallInfo(vm.MemRange(transaction.calldata(), 0, transaction.calldatasize()),
