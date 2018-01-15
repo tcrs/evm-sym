@@ -233,13 +233,12 @@ def run_block(s, solver, log_trace=False):
         elif name == 'NOT':
             reducestack(lambda x: ~x)
         elif name == 'BYTE':
-            val, idx = getargs(ins)
-            if is_concrete(idx):
-                # TODO: Does the extracted byte really go in the MSB?
-                s.stack.append(z3.Concat(get_byte(val, idx.as_long()), z3.BitVecVal(0, 248)))
+            idx, val = getargs(ins)
+            bidx = as_concrete(idx)
+            if bidx <= 31:
+                s.stack.append(z3.ZeroExt(248, get_byte(val, bidx)))
             else:
-                # TODO: 32 if-else tree?
-                raise NotImplementedError('Non-concrete BYTE index')
+                s.stack.append(z3.BitVecVal(0, 256))
         elif name == 'SIGNEXTEND':
             idx, val = getargs(ins)
             bidx = as_concrete(idx)
