@@ -242,12 +242,13 @@ def run_block(s, solver, log_trace=False):
                 raise NotImplementedError('Non-concrete BYTE index')
         elif name == 'SIGNEXTEND':
             idx, val = getargs(ins)
-            if is_concrete(idx):
-                nbits = 8 * (idx.as_long() + 1)
+            bidx = as_concrete(idx)
+            if bidx <= 31:
+                nbits = 8 * (bidx + 1)
                 to_extend = z3.Extract(nbits - 1, 0, val)
                 s.stack.append(z3.SignExt(256 - nbits, to_extend))
             else:
-                raise NotImplementedError('Non-concrete SIGNEXTEND index')
+                s.stack.append(val)
         elif name == 'CODESIZE':
             s.stack.append(z3.BitVecVal(s.code.size(), 256))
         elif name == 'SHA3':
