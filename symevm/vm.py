@@ -205,7 +205,7 @@ def run_block(s, solver, log_trace=False):
                 z3.Extract(255, 0, z3.URem(z3.ZeroExt(256, x) * z3.ZeroExt(256, y), z3.ZeroExt(256, z)))))
         elif name == 'EXP':
             # TODO z3 currently doesn't seem to provide __pow__ on BitVecs?
-            reducestack(lambda x, y: z3.BitVecVal(x.as_long() ** y.as_long(), 256))
+            reducestack(lambda x, y: z3.BitVecVal(pow(x.as_long(), y.as_long(), 1 << 256), 256))
         elif name == 'LT':
             reducestack(lambda x, y: _bool_to_01(z3.ULT(x, y)))
         elif name == 'GT':
