@@ -69,7 +69,7 @@ class CFGNode:
         n = CFGNode(self.global_state, self.transaction);
         # Put current storage for current contract into global state so that it
         # is correctly picked up for re-entrant calls
-        n.global_state[self.addr] = n.global_state[self.addr]._replace(storage=self.storage, balance=s.balance - callinfo.value)
+        n.global_state[self.addr] = n.global_state[self.addr]._replace(storage=self.storage, balance=self.balance - callinfo.value)
         n.parent = self
         n.code = n.global_state[code_addr].code
         child_s = self.get_contract_state(addr)
