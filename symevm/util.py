@@ -13,7 +13,7 @@ def pushval(code, off):
         npush = op - 0x60 + 1
         bv = code[off + 1:off + npush + 1]
         if len(bv) != npush:
-            bv += [0] * (npush - len(bv))
+            bv += b'\0' * (npush - len(bv))
         return utils.big_endian_to_int(bv)
 
 def disassemble(code, start_pc, max_pc, pc_hex=False, show_pc=True):
