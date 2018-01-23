@@ -197,7 +197,7 @@ def run_block(s, solver, log_trace=False):
         elif name == 'SDIV':
             reducestack(lambda x, y: z3.If(y == 0,
                 z3.BitVecVal(0, 256), z3.If(x == -2**255 and y == -1,
-                    z3.BitVecVal(-2*255, 256), x / y)))
+                    z3.BitVecVal(-2**255, 256), x / y)))
         elif name == 'MOD':
             reducestack(lambda x, y: z3.If(y == 0, z3.BitVecVal(0, 256), z3.URem(x, y)))
         elif name == 'SMOD':
