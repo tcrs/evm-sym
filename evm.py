@@ -147,7 +147,6 @@ def main(argv):
     # TODO
     # - HANDLE LOOPS!!! Probably helped by limiting max gas
     # - limit initial_gas <= block gas limit
-    # - Maintain address:value mapping in global state
 
     base_t = symevm.state.TransactionState('base', 0x1234, global_state, initial_storage_policy=symevm.state.storage_any_policy)
     root = symevm.cfg.get_cfg(code, base_t, print_trace=args.trace)
