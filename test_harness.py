@@ -1,12 +1,27 @@
+import os
 import sys
 import json
 import argparse
 import z3
 from ethereum import utils
 import symevm.util, symevm.code, symevm.state, symevm.cfg, symevm.vm
+import traceback
+
+def all_json_files(directory):
+    for top, _, files in os.walk(directory):
+        for f in files:
+            if f.endswith('.json'):
+                yield os.path.join(top, f)
 
 def tests_from_files(filenames):
-    for filename in filenames:
+    def test_files():
+        for filename in filenames:
+            if os.path.isdir(filename):
+                yield from all_json_files(filename)
+            else:
+                yield filename
+
+    for filename in test_files():
         with open(filename, 'r') as f:
             loaded = json.load(f)
         for name, test in loaded.items():
@@ -88,6 +103,7 @@ def run_test(args, name, test):
     #print(leaves[0].storage)
     #print(leaves[0].global_state)
 
+    failed = False
     if 'post' in test:
         for addr, info in test['post'].items():
             addr = int(addr, 0)
@@ -97,20 +113,47 @@ def run_test(args, name, test):
                     v = int(v, 0)
                     calculated = z3.simplify(z3.Select(leaves[0].storage, z3.BitVecVal(k, 256)))
                     if v != calculated.as_long():
+                        failed = True
                         print('FAIL: expected storage[{}][{}] == {}. Actual value: {}'.format(
                             addr, k, v, calculated))
     else:
         # TODO think should check there was an abort maybe?
         pass
 
+    return not failed
+
 def add_args(p):
     p.add_argument('tests', nargs='+', help='Test JSON files')
     p.add_argument('--cfg', action='store_true', help='Print CFG of test code')
     p.add_argument('--trace', action='store_true', help='Print detailed trace of instruction execution')
+    p.add_argument('--continue', dest='cont', choices=('y', 'n'), default=None, help='Continue after test failure. Default y for multiple files on command line')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     add_args(parser)
     args = parser.parse_args()
+    if args.cont is None:
+        args.cont = 'y' if len(args.tests) > 1 else 'n'
+    failed = []
+    passed = []
     for name, test in tests_from_files(args.tests):
-        run_test(args, name, test)
+        try:
+            if run_test(args, name, test):
+                passed.append(name)
+            else:
+                failed.append(name)
+                if args.cont == 'n':
+                    sys.exit(1)
+        except KeyboardInterrupt:
+            sys.exit(1)
+        except:
+            failed.append(name)
+            if args.cont == 'n':
+                raise
+            else:
+                traceback.print_exc()
+    print('Passed {}/{}'.format(len(passed), len(passed) + len(failed)))
+    if failed:
+        print('Failed tests:')
+        for n in failed:
+            print(n)
