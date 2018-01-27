@@ -339,9 +339,9 @@ def run_block(s, solver, log_trace=False):
             if name in {'CALL', 'CALLCODE'}:
                 gas, call_addr, value, in_off, in_sz, out_off, out_sz = getargs(ins)
                 caller = s.addr
-            elif name == 'CALLDELEGATE':
+            elif name == 'DELEGATECALL':
                 gas, call_addr, in_off, in_sz, out_off, out_sz = getargs(ins)
-                value = s.value
+                value = s.callinfo.value
                 caller = s.caller
             else:
                 assert False, name
