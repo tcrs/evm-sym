@@ -1,7 +1,7 @@
 import z3
 import copy
 import collections
-from . import util
+from . import util, mem
 from ethereum import opcodes, utils
 
 MemorySort = z3.ArraySort(z3.BitVecSort(256), z3.BitVecSort(8))
@@ -29,7 +29,7 @@ class CFGNode:
             self.code = None
             self.stack = []
             self.callstack = []
-            self.memory = MemoryEmpty
+            self.memory = mem.Memory()
             self.storage = None
             self.balance = None
             self.gas = None
@@ -41,7 +41,7 @@ class CFGNode:
             self.code = parent.code
             self.stack = copy.copy(parent.stack)
             self.callstack = parent.callstack
-            self.memory = parent.memory
+            self.memory = copy.copy(parent.memory)
             self.storage = parent.storage
             self.balance = parent.balance
             self.gas = parent.gas
@@ -94,9 +94,8 @@ class CFGNode:
             n.balance = n.global_state[n.addr].balance
             n.parent = self
             n.predicates.append(retinfo.retresult == 1)
-            # TODO handle non-concrete sizes?
-            for i in range(min(retdata_sz.as_long(), retinfo.retdata_sz.as_long())):
-                n.memory = z3.Store(n.memory, retinfo.retdata_start + i, z3.Select(self.memory, retdata_off + i))
+            n.memory.overlay(self.memory, retinfo.retdata_start, retdata_off,
+                z3.If(retdata_sz < retinfo.retdata_sz, retdata_sz, retinfo.retdata_sz))
             n.retdata = MemRange(self.memory, retinfo.retdata_start, retinfo.retdata_sz)
             self.successors.append(n)
             return n
@@ -112,9 +111,8 @@ class CFGNode:
             n.parent = self
             # Note: return 0
             n.predicates.append(retinfo.retresult == 0)
-            # TODO handle non-concrete sizes?
-            for i in range(min(retdata_sz.as_long(), retinfo.retdata_sz.as_long())):
-                n.memory = z3.Store(n.memory, retinfo.retdata_start + i, z3.Select(self.memory, retdata_off + i))
+            n.memory.overlay(self.memory, retinfo.retdata_start, retdata_off,
+                z3.If(retdata_sz < retinfo.retdata_sz, retdata_sz, retinfo.retdata_sz))
             n.retdata = MemRange(self.memory, retinfo.retdata_start, retinfo.retdata_end)
             self.successors.append(n)
             return n
@@ -255,7 +253,7 @@ def run_block(s, solver, log_trace=False):
             v = MemoryEmpty
             n = as_concrete(sz)
             for i in range(n):
-                v = z3.Store(v, i, z3.Select(s.memory, start + i))
+                v = z3.Store(v, i, s.memory.select(start + i))
             s.stack.append(sha3(v))
             # TODO when n == 0 or all values are concrete, simplify!
             #start, sz = as_concrete(start), as_concrete(sz)
@@ -273,16 +271,19 @@ def run_block(s, solver, log_trace=False):
         elif name == 'CALLER':
             s.stack.append(s.caller)
         elif name == 'CODECOPY':
+            # TODO handle non-concrete size
             start_mem, start_code, sz = getargs(ins)
             start_code = as_concrete(start_code)
             for i in range(as_concrete(sz)):
-                s.memory = z3.Store(s.memory, start_mem + i, s.code[start_code + i])
+                s.memory.store(start_mem + i, s.code[start_code + i])
         elif name == 'CALLDATACOPY':
             src, dest, sz = getargs(ins)
             cd_mem, cd_off, cd_sz = s.callinfo.calldata
-            for i in range(sz.as_long()):
-                cd_val = z3.If(src + i < cd_sz, z3.Select(cd_mem, cd_off + src + i), 0)
-                s.memory = z3.Store(s.memory, dest + i, cd_val)
+            # TODO cache this limited calldata memory object - this is so that
+            # out of range calldata reads correctly return 0s
+            limited_cdmem = mem.Memory()
+            limited_cdmem.overlay(cd_mem, 0, cd_off, cd_sz)
+            s.memory.overlay(limited_cdmem, dest, cd_off + src, sz)
         elif name == 'CALLDATALOAD':
             args = getargs(ins)
             cd_mem, cd_off, cd_sz, *_ = s.callinfo.calldata
@@ -298,20 +299,20 @@ def run_block(s, solver, log_trace=False):
             # TODO non-concrete length, retdata overflow (should terminate)
             if hasattr(s, retdata):
                 for i in range(sz.as_long()):
-                    s.memory = z3.Store(s.memory, dest + i, z3.Select(s.retdata.mem, s.retdata.offset + src + i))
+                    s.memory.store(dest + i, z3.Select(s.retdata.mem, s.retdata.offset + src + i))
         elif name == 'POP':
             getargs(ins)
             pass
         elif name == 'MLOAD':
             args = getargs(ins)
-            s.stack.append(z3.simplify(z3.Concat(*[z3.Select(s.memory, args[0] + i) for i in range(32)])))
+            s.stack.append(z3.simplify(z3.Concat(*[s.memory.select(args[0] + i) for i in range(32)])))
         elif name == 'MSTORE':
             args = getargs(ins)
             for i in range(32):
-                s.memory = z3.Store(s.memory, args[0] + i, get_byte(args[1], i))
+                s.memory.store(args[0] + i, get_byte(args[1], i))
         elif name == 'MSTORE8':
             args = getargs(ins)
-            s.memory = z3.Store(s.memory, args[0], get_byte(args[1], 31))
+            s.memory.store(args[0], get_byte(args[1], 31))
         elif name == 'SLOAD':
             args = getargs(ins)
             s.stack.append(z3.simplify(z3.Select(s.storage, args[0])))
