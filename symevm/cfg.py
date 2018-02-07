@@ -60,6 +60,17 @@ def get_cfg(code, transaction, print_trace=True, verbose_coverage=True):
 
     return rectrace(root, z3.Solver(), set())
 
+def to_json(code, root):
+    def recprint(elems, t, blockname):
+        elems.append({'data': dict(id=blockname, content='\n'.join(util.disassemble(t.code, t.start_pc, t.pc)))})
+        for i, succ in enumerate(t.successors):
+            sname = blockname + '_' + str(i)
+            recprint(elems, succ, sname)
+            elems.append({'data': dict(source=blockname, target=sname, content=str(z3.simplify(z3.And(succ.predicates))))})
+    e = []
+    recprint(e, root, 'r')
+    print(json.dumps(e, indent=2))
+
 def to_dot(code, root, root_env=None, check_env=None, solver=None):
     def recprint(t, blockname):
         colour = 'black'
