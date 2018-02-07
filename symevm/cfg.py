@@ -76,7 +76,7 @@ def to_dot(code, root, root_env=None, check_env=None, solver=None):
         print('{}[color={},label="@@ 0x{:x} @@\n{}"];'.format(blockname, colour, t.addr, '\\n'.join(util.disassemble(t.code, t.start_pc, t.pc))))
         #print('}')
         if hasattr(t, 'retdata_off') and vm.is_concrete(t.retdata_sz):
-            retlabel = ', '.join(str(z3.simplify(z3.Select(t.memory, t.retdata_off + i)))
+            retlabel = ', '.join(str(z3.simplify(t.memory.select(t.retdata_off + i)))
                 for i in range(t.retdata_sz.as_long()))
         else:
             retlabel = None
