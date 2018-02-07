@@ -17,6 +17,16 @@ def pushval(code, off):
         return utils.big_endian_to_int(bv)
 
 def disassemble(code, start_pc, max_pc, pc_hex=False, show_pc=True):
+    for pc, instr in disassemble_core(code, start_pc, max_pc):
+        pc_str = ''
+        if show_pc:
+            if pc_hex:
+                pc_str = hex(pc) + ': '
+            else:
+                pc_str = str(pc) + ': '
+        yield pc_str + instr
+
+def disassemble_core(code, start_pc, max_pc):
     assert start_pc <= max_pc
     pc = start_pc
     while pc <= max_pc:
@@ -28,11 +38,7 @@ def disassemble(code, start_pc, max_pc, pc_hex=False, show_pc=True):
         if name.startswith('PUSH'):
             npush = op - 0x60 + 1
             # TODO supposed to get zeros if some bytes >= len(inp)
-            yield hex(utils.big_endian_to_int(code[pc+1:pc+npush+1]))
+            yield pc, name + ' ' + hex(utils.big_endian_to_int(code[pc+1:pc+npush+1]))
         else:
-            if show_pc:
-                pc_str = (hex(pc) if pc_hex else str(pc)) + ':'
-            else:
-                pc_str = ''
-            yield pc_str + name
+            yield pc, name
         pc += oplen(op)
