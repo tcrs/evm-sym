@@ -51,6 +51,7 @@ def get_cfg(code, transaction, print_trace=True, verbose_coverage=True):
     # Note: allow executing code which is not from contract transaction.address()
     root.code = code
     root.storage = contract_state.storage
+    root.balance = contract_state.balance
     root.gas = transaction.initial_gas()
     root.callinfo = vm.CallInfo(vm.MemRange(transaction.calldata(), 0, transaction.calldatasize()),
         transaction.initial_gas(), transaction.callvalue())

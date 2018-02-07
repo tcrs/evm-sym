@@ -71,7 +71,8 @@ class CFGNode:
         # is correctly picked up for re-entrant calls
         n.global_state[self.addr] = n.global_state[self.addr]._replace(storage=self.storage, balance=self.balance - callinfo.value)
         n.parent = self
-        n.code = n.global_state[code_addr].code
+        code_s = self.get_contract_state(code_addr)
+        n.code = code_s.code
         child_s = self.get_contract_state(addr)
         n.storage = child_s.storage
         n.balance = child_s.balance + callinfo.value
@@ -337,15 +338,21 @@ def run_block(s, solver, log_trace=False):
             return
         elif name in {'CALL', 'CALLCODE', 'DELEGATECALL'}:
             if name in {'CALL', 'CALLCODE'}:
-                gas, call_addr, value, in_off, in_sz, out_off, out_sz = getargs(ins)
+                gas, addr, value, in_off, in_sz, out_off, out_sz = getargs(ins)
                 caller = s.addr
             elif name == 'DELEGATECALL':
-                gas, call_addr, in_off, in_sz, out_off, out_sz = getargs(ins)
+                gas, addr, in_off, in_sz, out_off, out_sz = getargs(ins)
                 value = s.callinfo.value
                 caller = s.caller
             else:
                 assert False, name
-            code_addr = call_addr if name == 'CALL' else s.addr
+            addr = z3.simplify(addr)
+            if name == 'CALL':
+                call_addr = addr
+                code_addr = addr
+            else:
+                call_addr = z3.BitVecVal(s.addr, 256)
+                code_addr = addr
 
             callres = z3.BitVec(name, 256)
             s.stack.append(callres)
