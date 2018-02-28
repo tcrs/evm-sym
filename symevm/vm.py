@@ -167,12 +167,6 @@ def run_block(s, solver, log_trace=False):
         # pyethereum gas field we're using here is not the latest mainnet values
         s.gas = s.gas - gas
 
-        ## Execute instruction
-        # TODO
-        #  - Check that the semantics of z3 math ops match EVM spec exactly
-        #  (especially for MOD/SMOD)...
-        # - teach z3 things like SHA3(a) == SHA3(b) iff a == b
-
         if op >= 0x80 and op <= 0x8f: # DUPn
             n = op - 0x80
             s.stack.append(s.stack[-(n + 1)])

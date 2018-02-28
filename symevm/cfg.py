@@ -1,18 +1,22 @@
 import z3
 import collections
+import json
 from . import vm, util
 
 def print_coverage(addr, cov):
-    max_pc = max(e for _, e in cov.keys())
-    rep = ['.'] * (max_pc + 1)
-    for (start, end), v in cov.items():
-        if v:
-            c = str(v) if v <= 9 else '!'
-            rep[start:end] = [c] * (end - start)
-    print('0x{:x}: {}'.format(addr, ''.join(rep)))
+    def sym(x):
+        if x > 9:
+            return '!'
+        elif x == 0:
+            return '.'
+        else:
+            return str(x)
 
-def get_cfg(code, transaction, print_trace=True, verbose_coverage=True):
-    coverage = {}
+    print('0x{:x}: {}'.format(addr, ''.join(sym(n) for n in cov)))
+
+def get_cfg(code, transaction, print_trace=True, verbose_coverage=True, coverage=None):
+    if coverage is None:
+        coverage = {}
     def rectrace(node, solver, covered_jumpdests):
         try:
             vm.run_block(node, solver, log_trace=print_trace)
@@ -21,9 +25,10 @@ def get_cfg(code, transaction, print_trace=True, verbose_coverage=True):
             node.end_info = []
 
         if verbose_coverage:
-            coverage.setdefault(node.addr, collections.defaultdict(int))
-            coverage[node.addr][(0, node.code.size())] = 0
-            coverage[node.addr][(node.start_pc, node.pc)] += 1
+            # TODO erm node.code is not always global_state[node.addr].code?!
+            coverage.setdefault(node.addr, [0] * node.code.size())
+            for i in range(node.start_pc, node.pc + 1):
+                coverage[node.addr][i] += 1
             print()
             for addr, cov in coverage.items():
                 print_coverage(addr, cov)
@@ -60,7 +65,7 @@ def get_cfg(code, transaction, print_trace=True, verbose_coverage=True):
 
     return rectrace(root, z3.Solver(), set())
 
-def to_json(code, root):
+def to_json(root):
     def recprint(elems, t, blockname):
         elems.append({'data': dict(id=blockname, content='\n'.join(util.disassemble(t.code, t.start_pc, t.pc)))})
         for i, succ in enumerate(t.successors):
@@ -71,7 +76,7 @@ def to_json(code, root):
     recprint(e, root, 'r')
     print(json.dumps(e, indent=2))
 
-def to_dot(code, root, root_env=None, check_env=None, solver=None):
+def to_dot(root, root_env=None, check_env=None, solver=None):
     def recprint(t, blockname):
         colour = 'black'
         if solver is not None:

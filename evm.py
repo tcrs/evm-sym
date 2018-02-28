@@ -1,6 +1,7 @@
 import z3
 import sys
 import copy
+import json
 import argparse
 import collections
 from ethereum import opcodes, utils
@@ -12,24 +13,6 @@ StorageSort = z3.ArraySort(z3.BitVecSort(256), z3.BitVecSort(256))
 
 MemoryEmpty = z3.K(z3.BitVecSort(256), z3.BitVecVal(0, 8))
 StorageEmpty = z3.K(z3.BitVecSort(256), z3.BitVecVal(0, 256))
-
-def memory_any():
-    return z3.Const('memory', MemorySort)
-
-def storage_any():
-    return z3.Const('storage', StorageSort)
-
-def print_trace(t, prefix=''):
-    print('{}{}{}:{}'.format(prefix, (t.end_type + ' ') if t.end_type is not None else '', t.pcs, t.predicates))
-    for succ in t.successors:
-        assert succ.parent is t
-        print_trace(succ, prefix = (prefix + ' >'))
-
-def filter_traces(t, fn):
-    if fn(t):
-        yield t
-    for succ in t.successors:
-        yield from filter_traces(succ, fn)
 
 def is_reachable(solver, trace, trace_env, env):
     def all_preds(t):
@@ -92,64 +75,42 @@ def try_reach(targets, root, root_env, envstack):
 
 def add_args(parser):
     parser.add_argument('code', default='-', help='EVM code as a hex string')
-    parser.add_argument('--cfg', action='store_true', help='Output full control-flow graph in graphviz format')
+    parser.add_argument('--progress', action='store_true', help='Verbose progress output during CFG trace')
+    parser.add_argument('--cfg-dot', action='store_true', help='Output full control-flow graph in graphviz format')
+    parser.add_argument('--cfg-json', action='store_true', help='Output full control-flow graph in json format (suitable for cytoscape')
     parser.add_argument('--trace', action='store_true', help='Output verbose trace of execution')
     parser.add_argument('--caller', type=lambda x: int(x, 0), help='CALLER instruction return value')
 
-def named_storage(name):
-    #return z3.Const('Storage<{}>'.format(name), StorageSort)
-    return StorageEmpty
-
-contract1 = [
-    '0 SLOAD',
-    '@finish JUMPI',
-    '1 0 SSTORE',
-    '1 0 0 0 0 0x1235 77 CALL',
-    '0 0 SSTORE',
-    '=finish 1 0 RETURN']
-
-contract2 = [
-    '1 0 MSTORE8',
-    '1 1 1 0 0 0x1234 75 CALL',
-    '1 1 RETURN',
-    ]
-
-test_global_state = {
-    #0x1234: symevm.vm.ContractState(symevm.code.Code(assemble.assemble(['0 0 0 0 0 0x1235 77 CALL 1 1 SSTORE STOP'])), named_storage('0x1234')),
-    0x1234: symevm.state.ContractState(symevm.code.Code(assemble.assemble(contract1)), named_storage('0x1234')),
-    #0x1235: symevm.vm.ContractState(symevm.code.Code(assemble.assemble(['0 0 0 0 0 0x1234 75 CALL'])), named_storage('0x1235')),
-    0x1235: symevm.state.ContractState(symevm.code.Code(assemble.assemble(contract2)), named_storage('0x1235')),
-}
+def load_state(filename):
+    with open(filename, "r") as f:
+        raw = json.loads(f.read())
+    state = {}
+    entry_addr = None
+    if 'contracts' in raw:
+        for addr, info in raw['contracts'].items():
+            if entry_addr is None:
+                entry_addr = int(addr, 0)
+            state[int(addr, 0)] = symevm.state.ContractState(symevm.code.Code(utils.parse_as_bin(info['code'])))
+    if 'entry' in raw:
+        entry_addr = int(raw['entry'], 0)
+    return state, entry_addr
 
 def main(argv):
     p = argparse.ArgumentParser()
     add_args(p)
     args = p.parse_args(argv)
 
-    if args.caller is None:
-        print('Must specify caller')
-        sys.exit(1)
+    global_state, entry_addr = load_state(args.code)
 
-    if args.code == '-':
-        code = sys.stdin.read()
-    else:
-        code = open(args.code, 'r').read()
-    code = utils.parse_as_bin(code.rstrip())
-
-    code = symevm.code.Code(code)
-
-    #global_state = test_global_state
-    global_state = {
-        0x1234: symevm.state.ContractState(code),
-        #0x1234: symevm.vm.ContractState(code, StorageEmpty),
-    }
-
-    # TODO
-    # - HANDLE LOOPS!!! Probably helped by limiting max gas
-    # - limit initial_gas <= block gas limit
-
-    base_t = symevm.state.TransactionState('base', 0x1234, global_state, initial_storage_policy=symevm.state.storage_any_policy)
-    root = symevm.cfg.get_cfg(code, base_t, print_trace=args.trace)
+    base_t = symevm.state.TransactionState('base', entry_addr, global_state,
+        initial_storage_policy=symevm.state.storage_any_policy)
+    coverage = {}
+    root = symevm.cfg.get_cfg(global_state[entry_addr].code, base_t, print_trace=args.trace, verbose_coverage=args.progress, coverage=coverage)
+    if args.cfg_json:
+        symevm.cfg.to_json(root)
+    if args.cfg_dot:
+        symevm.cfg.to_dot(root)
+    return
     if args.cfg:
         poss_state = symevm.state.TransactionState('t', 0x1234, global_state, caller=z3.BitVecVal(args.caller, 256),
             initial_storage_policy=symevm.state.storage_empty_policy,
