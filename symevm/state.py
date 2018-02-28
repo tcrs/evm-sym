@@ -1,6 +1,8 @@
 import z3
 import collections
 
+from . import mem
+
 MemorySort = z3.ArraySort(z3.BitVecSort(256), z3.BitVecSort(8))
 StorageSort = z3.ArraySort(z3.BitVecSort(256), z3.BitVecSort(256))
 
@@ -183,7 +185,7 @@ class TransactionState:
 
     @cached
     def calldata(self):
-        return z3.Const('CALLDATA<{}>'.format(self.name), MemorySort)
+        return mem.Memory(base=z3.Const('CALLDATA<{}>'.format(self.name), MemorySort))
 
     @cached
     def calldatasize(self):

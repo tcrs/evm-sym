@@ -289,7 +289,7 @@ def run_block(s, solver, log_trace=False):
             args = getargs(ins)
             cd_mem, cd_off, cd_sz, *_ = s.callinfo.calldata
             s.stack.append(z3.simplify(z3.Concat(
-                *[z3.If(args[0] + i < cd_sz, z3.Select(cd_mem, cd_off + args[0] + i), 0) for i in range(32)])))
+                *[z3.If(args[0] + i < cd_sz, cd_mem.select(cd_off + args[0] + i), 0) for i in range(32)])))
         elif name == 'RETURNDATASIZE':
             if hasattr(s, retdata):
                 s.stack.append(s.retdata.size)
