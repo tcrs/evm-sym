@@ -23,17 +23,25 @@ class Memory:
         self._mem = z3.Store(self._mem, idx, val)
 
     def overlay(self, chunk, base_off, chunk_off, length):
-        # TODO handle concrete length as sequence of store-selects
-        if self._idx is None:
-            self._idx = z3.BitVec('idx', 256)
-        if isinstance(chunk, Memory):
-            chunk_val = chunk.select(self._idx - base_off + chunk_off)
+        slen = z3.simplify(length)
+        if z3.is_bv_value(slen):
+            for i in range(slen.as_long()):
+                if isinstance(chunk, Memory):
+                    sel = chunk.select(chunk_off + i)
+                else:
+                    sel = z3.Select(chunk, chunk_off + i)
+                self._mem = z3.Store(self._mem, base_off + i, sel)
         else:
-            chunk_val = z3.Select(chunk, self._idx - base_off + chunk_off)
-        self._mem = z3.If(
-            z3.And(self._idx >= base_off, self._idx < base_off + length),
-            z3.Store(state.MemoryEmpty, self._idx, chunk_val),
-            self._mem)
+            if self._idx is None:
+                self._idx = z3.BitVec('idx', 256)
+            if isinstance(chunk, Memory):
+                chunk_val = chunk.select(self._idx - base_off + chunk_off)
+            else:
+                chunk_val = z3.Select(chunk, self._idx - base_off + chunk_off)
+            self._mem = z3.If(
+                z3.And(self._idx >= base_off, self._idx < base_off + length),
+                z3.Store(state.MemoryEmpty, self._idx, chunk_val),
+                self._mem)
 
     def __copy__(self):
         if self._idx is None:
