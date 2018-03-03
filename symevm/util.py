@@ -1,4 +1,5 @@
-from ethereum import opcodes, utils
+from . import vm_isa
+from ethereum import utils
 
 def oplen(op):
     if op >= 0x60 and op <= 0x7F:
@@ -32,7 +33,8 @@ def disassemble_core(code, start_pc, max_pc):
     while pc <= max_pc:
         op = code[pc]
         try:
-            name, *_ = opcodes.opcodes[op]
+            instr = vm_isa.opcodes[op]
+            name = instr.name
         except KeyError:
             name = 'INVALID(' + hex(op) + ')'
         if name.startswith('PUSH'):

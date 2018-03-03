@@ -38,6 +38,10 @@ execution engine doesn't crash.
 # TODO
 
  - Accurate Gas model, with trace end on out-of-gas
+   - Model memory gas cost (track max index of touched memory words)
+   - Model call gas cost
+   - Call and selfdestruct gas cost depends on whether target contract exists
+ - Model refund counter
  - Loop handling, can handle loops by tracing but this is currently disabled as
    the tracer can get stuck in an infinite loop quite easily. This would
    probably practical to re-enable when the Gas model is implemented properly,
@@ -47,7 +51,7 @@ execution engine doesn't crash.
  - More efficient Memory model. Z3 does not support an extended array theory
    which includes copies ([see here][ext-arry]). These are required for
    CALLDATACOPY (and probably RETURNDATACOPY) with non-concrete size arguments.
-   I have seen this is contracts which forward call data to another contract
+   I have seen this in contracts which forward call data to another contract
    (via a delegate call), copying CALLDATASIZE bytes into memory and passing
    that on through the call. I have implemented something relatively simple in
    `mem.py`, but it turns out to be very slow to solve :(.

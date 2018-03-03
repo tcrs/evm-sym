@@ -1,8 +1,8 @@
 import z3
 import copy
 import collections
-from . import util, mem
-from ethereum import opcodes, utils
+from . import util, mem, vm_isa
+from ethereum import utils
 
 MemorySort = z3.ArraySort(z3.BitVecSort(256), z3.BitVecSort(8))
 StorageSort = z3.ArraySort(z3.BitVecSort(256), z3.BitVecSort(256))
@@ -136,9 +136,6 @@ def _bool_to_01(bv):
     return z3.If(bv, z3.BitVecVal(1, 256), z3.BitVecVal(0, 256))
 
 def run_block(s, solver, log_trace=False):
-    def getargs(n):
-        return [s.stack.pop() for i in range(n)]
-
     def end_trace(reason, *args):
         s.end_type = reason
         s.end_info = args
@@ -147,93 +144,102 @@ def run_block(s, solver, log_trace=False):
     while True:
         op = s.code[s.pc]
         try:
-            name, ins, outs, gas = opcodes.opcodes[op]
+            instr = vm_isa.opcodes[op]
         except KeyError:
             end_trace('invalid')
             return
 
         if log_trace:
-            print('{:04}: {}'.format(s.pc, name))
+            print('{:04}: {}'.format(s.pc, instr.name))
             print('> ' + ';; '.join(str(z3.simplify(x)) for x in s.stack))
             #print('> {} | {} | {}'.format(stack, mem, store))
 
+        try:
+            instr_args = [s.stack.pop() for i in range(instr.pop)]
+        except IndexError:
+            end_trace('stack underflow')
+            return
+
         def reducestack(fn):
-            s.stack.append(fn(*getargs(ins)))
+            s.stack.append(fn(*instr_args))
 
         oplen = 1
 
-        # TODO Proper gas accounting!
-        # Some instructions have variable gas costs
-        # pyethereum gas field we're using here is not the latest mainnet values
-        s.gas = s.gas - gas
+        s.gas = s.gas - instr.base_gas
+        if instr.extra_gas is not None:
+            s.gas = s.gas - instr.extra_gas(s, *instr_args)
 
         if op >= 0x80 and op <= 0x8f: # DUPn
-            n = op - 0x80
-            s.stack.append(s.stack[-(n + 1)])
+            # instr_args[0] = old top of stack
+            for v in reversed(instr_args):
+                s.stack.append(v)
+            s.stack.append(instr_args[-1])
         elif op >= 0x90 and op <= 0x9f: #SWAPn
-            n = op - 0x90 + 1
-            temp = s.stack[-(n + 1)]
-            s.stack[-(n + 1)] = s.stack[-1]
-            s.stack[-1] = temp
+            # Old top of stack pushed first
+            s.stack.append(instr_args[0])
+            # Then the middle section (in original order)
+            for v in reversed(instr_args[1:-1]):
+                s.stack.append(v)
+            # Then bottom value on top
+            s.stack.append(instr_args[-1])
         elif op >= 0x60 and op <= 0x7f: #PUSHn
             npush = op - 0x60 + 1
             s.stack.append(z3.BitVecVal(util.pushval(s.code, s.pc), 256))
             oplen += npush
-        elif name == 'ADD':
+        elif instr.name == 'ADD':
             reducestack(lambda x, y: x + y)
-        elif name == 'MUL':
+        elif instr.name == 'MUL':
             reducestack(lambda x, y: x * y)
-        elif name == 'SUB':
+        elif instr.name == 'SUB':
             reducestack(lambda x, y: x - y)
-        elif name == 'DIV':
+        elif instr.name == 'DIV':
             reducestack(lambda x, y: z3.If(y == 0, z3.BitVecVal(0, 256), z3.UDiv(x, y)))
-        elif name == 'SDIV':
+        elif instr.name == 'SDIV':
             reducestack(lambda x, y: z3.If(y == 0,
                 z3.BitVecVal(0, 256), z3.If(x == -2**255 and y == -1,
                     z3.BitVecVal(-2**255, 256), x / y)))
-        elif name == 'MOD':
+        elif instr.name == 'MOD':
             reducestack(lambda x, y: z3.If(y == 0, z3.BitVecVal(0, 256), z3.URem(x, y)))
-        elif name == 'SMOD':
-            # TODO args[1] == 0
+        elif instr.name == 'SMOD':
             reducestack(lambda x, y: z3.If(y == 0, z3.BitVecVal(0, 256), z3.SRem(x, y)))
-        elif name == 'ADDMOD':
+        elif instr.name == 'ADDMOD':
             reducestack(lambda x, y, z: z3.If(z == 0, z3.BitVecVal(0, 256),
                 z3.Extract(255, 0, z3.URem(z3.ZeroExt(1, x) + z3.ZeroExt(1, y), z3.ZeroExt(1, z)))))
-        elif name == 'MULMOD':
+        elif instr.name == 'MULMOD':
             reducestack(lambda x, y, z: z3.If(z == 0, z3.BitVecVal(0, 256),
                 z3.Extract(255, 0, z3.URem(z3.ZeroExt(256, x) * z3.ZeroExt(256, y), z3.ZeroExt(256, z)))))
-        elif name == 'EXP':
+        elif instr.name == 'EXP':
             # TODO z3 currently doesn't seem to provide __pow__ on BitVecs?
             reducestack(lambda x, y: z3.BitVecVal(pow(x.as_long(), y.as_long(), 1 << 256), 256))
-        elif name == 'LT':
+        elif instr.name == 'LT':
             reducestack(lambda x, y: _bool_to_01(z3.ULT(x, y)))
-        elif name == 'GT':
+        elif instr.name == 'GT':
             reducestack(lambda x, y: _bool_to_01(z3.UGT(x, y)))
-        elif name == 'SLT':
+        elif instr.name == 'SLT':
             reducestack(lambda x, y: _bool_to_01(x < y))
-        elif name == 'SGT':
+        elif instr.name == 'SGT':
             reducestack(lambda x, y: _bool_to_01(x > y))
-        elif name == 'EQ':
+        elif instr.name == 'EQ':
             reducestack(lambda x, y: _bool_to_01(x == y))
-        elif name == 'ISZERO':
+        elif instr.name == 'ISZERO':
             reducestack(lambda x: _bool_to_01(x == 0))
-        elif name == 'AND':
+        elif instr.name == 'AND':
             reducestack(lambda x, y: x & y)
-        elif name == 'OR':
+        elif instr.name == 'OR':
             reducestack(lambda x, y: x | y)
-        elif name == 'XOR':
+        elif instr.name == 'XOR':
             reducestack(lambda x, y: x ^ y)
-        elif name == 'NOT':
+        elif instr.name == 'NOT':
             reducestack(lambda x: ~x)
-        elif name == 'BYTE':
-            idx, val = getargs(ins)
+        elif instr.name == 'BYTE':
+            idx, val = instr_args
             bidx = as_concrete(idx)
             if bidx <= 31:
                 s.stack.append(z3.ZeroExt(248, get_byte(val, bidx)))
             else:
                 s.stack.append(z3.BitVecVal(0, 256))
-        elif name == 'SIGNEXTEND':
-            idx, val = getargs(ins)
+        elif instr.name == 'SIGNEXTEND':
+            idx, val = instr_args
             bidx = as_concrete(idx)
             if bidx <= 31:
                 nbits = 8 * (bidx + 1)
@@ -241,10 +247,10 @@ def run_block(s, solver, log_trace=False):
                 s.stack.append(z3.SignExt(256 - nbits, to_extend))
             else:
                 s.stack.append(val)
-        elif name == 'CODESIZE':
+        elif instr.name == 'CODESIZE':
             s.stack.append(z3.BitVecVal(s.code.size(), 256))
-        elif name == 'SHA3':
-            start, sz = getargs(ins)
+        elif instr.name == 'SHA3':
+            start, sz = instr_args
             v = MemoryEmpty
             n = as_concrete(sz)
             for i in range(n):
@@ -253,102 +259,101 @@ def run_block(s, solver, log_trace=False):
             # TODO when n == 0 or all values are concrete, simplify!
             #start, sz = as_concrete(start), as_concrete(sz)
             #stack.append(utils.sha3_256([as_concrete(
-        elif name in {'GASPRICE', 'COINBASE', 'TIMESTAMP', 'NUMBER', 'DIFFICULTY', 'GASLIMIT', 'ORIGIN'}:
-            reducestack(getattr(s.transaction, name.lower()))
-        elif name in {'BALANCE', 'BLOCKHASH', 'EXTCODESIZE'}:
-            reducestack(lambda x: (getattr(s.transaction, name.lower())())(x))
-        elif name == 'ADDRESS':
+        elif instr.name in {'GASPRICE', 'COINBASE', 'TIMESTAMP', 'NUMBER', 'DIFFICULTY', 'GASLIMIT', 'ORIGIN'}:
+            reducestack(getattr(s.transaction, instr.name.lower()))
+        elif instr.name in {'BALANCE', 'BLOCKHASH', 'EXTCODESIZE'}:
+            reducestack(lambda x: (getattr(s.transaction, instr.name.lower())())(x))
+        elif instr.name == 'ADDRESS':
             s.stack.append(s.addr)
-        elif name == 'CALLVALUE':
+        elif instr.name == 'CALLVALUE':
             s.stack.append(s.callinfo.value)
-        elif name == 'CALLDATASIZE':
+        elif instr.name == 'CALLDATASIZE':
             s.stack.append(s.callinfo.calldata.size)
-        elif name == 'CALLER':
+        elif instr.name == 'CALLER':
             s.stack.append(s.caller)
-        elif name == 'CODECOPY':
+        elif instr.name == 'CODECOPY':
             # TODO handle non-concrete size
-            start_mem, start_code, sz = getargs(ins)
+            start_mem, start_code, sz = instr_args
             start_code = as_concrete(start_code)
             for i in range(as_concrete(sz)):
                 s.memory.store(start_mem + i, s.code[start_code + i])
-        elif name == 'CALLDATACOPY':
-            src, dest, sz = getargs(ins)
+        elif instr.name == 'CALLDATACOPY':
+            src, dest, sz = instr_args
             cd_mem, cd_off, cd_sz = s.callinfo.calldata
             # TODO cache this limited calldata memory object - this is so that
             # out of range calldata reads correctly return 0s
             limited_cdmem = mem.Memory()
             limited_cdmem.overlay(cd_mem, 0, cd_off, cd_sz)
             s.memory.overlay(limited_cdmem, dest, cd_off + src, sz)
-        elif name == 'CALLDATALOAD':
-            args = getargs(ins)
+        elif instr.name == 'CALLDATALOAD':
+            addr, = instr_args
             cd_mem, cd_off, cd_sz, *_ = s.callinfo.calldata
             s.stack.append(z3.simplify(z3.Concat(
-                *[z3.If(args[0] + i < cd_sz, cd_mem.select(cd_off + args[0] + i), 0) for i in range(32)])))
-        elif name == 'RETURNDATASIZE':
+                *[z3.If(addr + i < cd_sz, cd_mem.select(cd_off + addr + i), 0) for i in range(32)])))
+        elif instr.name == 'RETURNDATASIZE':
             if hasattr(s, retdata):
                 s.stack.append(s.retdata.size)
             else:
                 s.stack.append(z3.BitVecVal(0, 256))
-        elif name == 'RETURNDATACOPY':
-            src, dest, sz = getargs(ins)
+        elif instr.name == 'RETURNDATACOPY':
+            src, dest, sz = instr_args
             # TODO non-concrete length, retdata overflow (should terminate)
             if hasattr(s, retdata):
                 for i in range(sz.as_long()):
                     s.memory.store(dest + i, z3.Select(s.retdata.mem, s.retdata.offset + src + i))
-        elif name == 'POP':
-            getargs(ins)
+        elif instr.name == 'POP':
             pass
-        elif name == 'MLOAD':
-            args = getargs(ins)
-            s.stack.append(z3.simplify(z3.Concat(*[s.memory.select(args[0] + i) for i in range(32)])))
-        elif name == 'MSTORE':
-            args = getargs(ins)
+        elif instr.name == 'MLOAD':
+            addr, = instr_args
+            s.stack.append(z3.simplify(z3.Concat(*[s.memory.select(addr + i) for i in range(32)])))
+        elif instr.name == 'MSTORE':
+            dst, word = instr_args
             for i in range(32):
-                s.memory.store(args[0] + i, get_byte(args[1], i))
-        elif name == 'MSTORE8':
-            args = getargs(ins)
-            s.memory.store(args[0], get_byte(args[1], 31))
-        elif name == 'SLOAD':
-            args = getargs(ins)
-            s.stack.append(z3.simplify(z3.Select(s.storage, args[0])))
-        elif name == 'SSTORE':
-            args = getargs(ins)
-            s.storage = z3.Store(s.storage, args[0], args[1])
-        elif name == 'PC':
+                s.memory.store(dst + i, get_byte(word, i))
+        elif instr.name == 'MSTORE8':
+            dst, word = instr_args
+            s.memory.store(dst, get_byte(word, 31))
+        elif instr.name == 'SLOAD':
+            addr, = instr_args
+            s.stack.append(z3.simplify(z3.Select(s.storage, addr)))
+        elif instr.name == 'SSTORE':
+            addr, word = instr_args
+            s.storage = z3.Store(s.storage, addr, word)
+        elif instr.name == 'PC':
             s.stack.append(z3.BitVecVal(s.pc, 256))
-        elif name == 'GAS':
+        elif instr.name == 'GAS':
             # TODO actually track gas usage?
             s.stack.append(z3.BitVec('{}:GAS'.format(s.pc), 256))
-        elif name in 'STOP':
+        elif instr.name in 'STOP':
             end_trace('stop')
             return
-        elif name == 'RETURN':
-            ret_start, ret_size = getargs(ins)
+        elif instr.name == 'RETURN':
+            ret_start, ret_size = instr_args
             s.make_child_return(ret_start, ret_size)
             return
-        elif name == 'REVERT':
-            ret_start, ret_size = getargs(ins)
+        elif instr.name == 'REVERT':
+            ret_start, ret_size = instr_args
             s.make_child_revert(ret_start, ret_size)
             return
-        elif name in {'CALL', 'CALLCODE', 'DELEGATECALL'}:
-            if name in {'CALL', 'CALLCODE'}:
-                gas, addr, value, in_off, in_sz, out_off, out_sz = getargs(ins)
+        elif instr.name in {'CALL', 'CALLCODE', 'DELEGATECALL'}:
+            if instr.name in {'CALL', 'CALLCODE'}:
+                gas, addr, value, in_off, in_sz, out_off, out_sz = instr_args
                 caller = s.addr
-            elif name == 'DELEGATECALL':
-                gas, addr, in_off, in_sz, out_off, out_sz = getargs(ins)
+            elif instr.name == 'DELEGATECALL':
+                gas, addr, in_off, in_sz, out_off, out_sz = instr_args
                 value = s.callinfo.value
                 caller = s.caller
             else:
-                assert False, name
+                assert False, instr.name
             addr = z3.simplify(addr)
-            if name == 'CALL':
+            if instr.name == 'CALL':
                 call_addr = addr
                 code_addr = addr
             else:
                 call_addr = z3.BitVecVal(s.addr, 256)
                 code_addr = addr
 
-            callres = z3.BitVec(name, 256)
+            callres = z3.BitVec('{}:{}({})'.format(s.pc, instr.name, z3.simplify(call_addr)), 256)
             s.stack.append(callres)
             if is_concrete(call_addr):
                 s.make_child_call(addr = call_addr.as_long(), code_addr=code_addr.as_long(), caller=caller,
@@ -357,25 +362,23 @@ def run_block(s, solver, log_trace=False):
                 return
             else:
                 end_trace('call', call_addr, value, gas)
-                name = '{}:CALL({})'.format(s.pc, z3.simplify(call_addr))
                 s.make_child_branch(new_pc = s.pc + 1, preds = [s.gas > 0, z3.Or(callres == 1, callres == 0)])
                 return
-        elif name == 'CREATE':
-            value, in_off, in_sz = getargs(ins)
-            name = '{}:CREATE({})'.format(s.pc, value)
-            res = z3.BitVec(name, 256)
+        elif instr.name == 'CREATE':
+            value, in_off, in_sz = instr_args
+            res = z3.BitVec('{}:CREATE({})'.format(s.pc, value), 256)
             s.stack.append(res)
             end_trace('create', value)
             s.make_child_branch(new_pc = s.pc + 1, preds = [s.gas > 0, z3.Or(res == 0, res == 1)])
             return
-        elif name == 'SUICIDE':
-            to_addr = getargs(ins)
+        elif instr.name == 'SELFDESTRUCT':
+            to_addr = instr_args
             end_trace('suicide', to_addr)
             # No successors
             return
-        elif name == 'JUMPI':
+        elif instr.name == 'JUMPI':
             end_trace(None)
-            loc, cond = getargs(ins)
+            loc, cond = instr_args
 
             fallthrough_pc = None
 
@@ -414,9 +417,9 @@ def run_block(s, solver, log_trace=False):
             if fallthrough_pc is not None:
                 s.make_child_branch(new_pc = fallthrough_pc, preds = [s.gas > 0, cond == 0])
             return
-        elif name == 'JUMP':
+        elif instr.name == 'JUMP':
             end_trace(None)
-            (loc,) = getargs(ins)
+            (loc,) = instr_args
             if is_concrete(loc):
                 s.make_child_branch(new_pc = loc.as_long(), preds=[s.gas > 0])
             else:
@@ -429,13 +432,12 @@ def run_block(s, solver, log_trace=False):
                     solver.pop()
             # No fallthrough
             return
-        elif name == 'JUMPDEST':
+        elif instr.name == 'JUMPDEST':
             s.jumpdests.add(s.pc)
-        elif name in {'LOG0', 'LOG1', 'LOG2', 'LOG3', 'LOG4'}:
-            getargs(ins)
+        elif instr.name in {'LOG0', 'LOG1', 'LOG2', 'LOG3', 'LOG4'}:
             pass
         else:
-            raise NotImplementedError(name)
+            raise NotImplementedError(instr.name)
 
         if log_trace:
             print('< ' + ';; '.join(str(z3.simplify(x)) for x in s.stack))
