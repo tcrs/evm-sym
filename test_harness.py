@@ -4,7 +4,7 @@ import json
 import argparse
 import z3
 from ethereum import utils
-import symevm.util, symevm.code, symevm.state, symevm.cfg, symevm.vm
+import symevm.util, symevm.code, symevm.state, symevm.cfg, symevm.vm, symevm.mem
 import traceback
 
 def all_json_files(directory):
@@ -38,7 +38,7 @@ def mem_from_str(text, base=symevm.state.MemoryEmpty):
     m = base
     for i, v in enumerate(b):
         m = z3.Store(m, z3.BitVecVal(i, 256), z3.BitVecVal(v, 8))
-    return m, len(b)
+    return symevm.mem.Memory(base=m), len(b)
 
 def get_state(items):
     state = {}

@@ -1,13 +1,13 @@
 import z3
 import collections
 
-from . import mem
-
 MemorySort = z3.ArraySort(z3.BitVecSort(256), z3.BitVecSort(8))
 StorageSort = z3.ArraySort(z3.BitVecSort(256), z3.BitVecSort(256))
 
 MemoryEmpty = z3.K(z3.BitVecSort(256), z3.BitVecVal(0, 8))
 StorageEmpty = z3.K(z3.BitVecSort(256), z3.BitVecVal(0, 256))
+
+from . import mem
 
 ContractState = collections.namedtuple('ContractState', 'code storage balance nonce')
 ContractState.__new__.__defaults__ = (None, None, None)
