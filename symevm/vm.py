@@ -168,6 +168,7 @@ def run_block(s, solver, log_trace=False):
         s.gas = s.gas - instr.base_gas
         if instr.extra_gas is not None:
             s.gas = s.gas - instr.extra_gas(s, *instr_args)
+        s.gas = z3.simplify(s.gas)
 
         if op >= 0x80 and op <= 0x8f: # DUPn
             # instr_args[0] = old top of stack

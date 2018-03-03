@@ -6,26 +6,26 @@ Instr.__new__.__defaults__ = (None,)
 
 # Derived from pyethereum's opcode.py
 def get_opcodes(metropolis=True):
-    Gexpbyte = 50
-    Gcopy = 3
-    Glogdata = 8
-    Gsha3word = 6
-    Gsset = 20000
-    Gsreset = 5000
+    Gexpbyte = z3.IntVal(50)
+    Gcopy = z3.IntVal(3)
+    Glogdata = z3.IntVal(8)
+    Gsha3word = z3.IntVal(6)
+    Gsset = z3.IntVal(20000)
+    Gsreset = z3.IntVal(5000)
 
     def words_ceil(n):
         # ceil(n / 32)
-        return (n + 31) >> 5
+        return z3.BV2Int((n + 31) >> 5)
 
     def copy_gas(sz):
         return words_ceil(sz) * Gcopy
 
     def log_gas(state, _, sz, *topics):
-        return sz * Glogdata
+        return z3.BV2Int(sz) * Glogdata
 
     def sstore_gas(state, addr, word):
         cur_val = z3.Select(state.storage, addr)
-        return z3.If(z3.And(cur_val == 0, word != 0), z3.BitVecVal(Gsset, 256), z3.BitVecVal(Gsreset, 256))
+        return z3.If(z3.And(cur_val == 0, word != 0), Gsset, Gsreset)
 
     ops = {
         0x00: Instr('STOP', 0, 0, 0),
@@ -40,7 +40,7 @@ def get_opcodes(metropolis=True):
         0x09: Instr('MULMOD', 3, 1, 8),
         # Note: currently only actually support concrete arguments to EXP
         0x0a: Instr('EXP', 2, 1, 10, lambda state, b, e: \
-            z3.If(e == 0, z3.BitVecVal(0, 256), z3.BitVecVal(Gexpbyte * ((e.as_long().bit_length() // 8) + 1), 256))),
+            z3.If(e == 0, z3.IntVal(0), Gexpbyte * ((e.as_long().bit_length() // 8) + 1))),
         0x0b: Instr('SIGNEXTEND', 2, 1, 5),
         0x10: Instr('LT', 2, 1, 3),
         0x11: Instr('GT', 2, 1, 3),
