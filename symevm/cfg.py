@@ -38,7 +38,7 @@ def get_cfg(code, transaction, print_trace=True, verbose_coverage=True, coverage
             for succ in node.successors:
                 print('{} => {}'.format(z3.simplify(z3.And(*succ.predicates)), succ.start_pc))
             if len(node.successors) == 0:
-                print('------------------ END OF THIS TRACE ------------')
+                print('------------------ END OF THIS TRACE ({}) ------------'.format(getattr(node, 'end_type', None)))
 
         for succ in node.successors:
             if succ.start_pc in covered_jumpdests:
