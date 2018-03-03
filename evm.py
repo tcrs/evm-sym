@@ -4,7 +4,6 @@ import copy
 import json
 import argparse
 import collections
-from ethereum import opcodes, utils
 import symevm.vm, symevm.util, symevm.bb, symevm.cfg, symevm.state, symevm.code
 import assemble
 
@@ -90,7 +89,7 @@ def load_state(filename):
         for addr, info in raw['contracts'].items():
             if entry_addr is None:
                 entry_addr = int(addr, 0)
-            state[int(addr, 0)] = symevm.state.ContractState(symevm.code.Code(utils.parse_as_bin(info['code'])))
+            state[int(addr, 0)] = symevm.state.ContractState(symevm.code.Code(info['code']))
     if 'entry' in raw:
         entry_addr = int(raw['entry'], 0)
     return state, entry_addr

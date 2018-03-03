@@ -1,5 +1,9 @@
 from . import vm_isa
-from ethereum import utils
+
+def hex_to_bytes(text):
+    if text.startswith('0x'):
+        text = text[2:]
+    return bytes.fromhex(text)
 
 def oplen(op):
     if op >= 0x60 and op <= 0x7F:
@@ -15,7 +19,7 @@ def pushval(code, off):
         bv = code[off + 1:off + npush + 1]
         if len(bv) != npush:
             bv += b'\0' * (npush - len(bv))
-        return utils.big_endian_to_int(bv)
+        return int.from_bytes(bv, byteorder='big')
 
 def disassemble(code, start_pc, max_pc, pc_hex=False, show_pc=True):
     for pc, instr in disassemble_core(code, start_pc, max_pc):
@@ -40,7 +44,7 @@ def disassemble_core(code, start_pc, max_pc):
         if name.startswith('PUSH'):
             npush = op - 0x60 + 1
             # TODO supposed to get zeros if some bytes >= len(inp)
-            yield pc, name + ' ' + hex(utils.big_endian_to_int(code[pc+1:pc+npush+1]))
+            yield pc, name + ' ' + hex(int.from_bytes(code[pc+1:pc+npush+1], byteorder='big'))
         else:
             yield pc, name
         pc += oplen(op)

@@ -3,7 +3,6 @@ import sys
 import json
 import argparse
 import z3
-from ethereum import utils
 import symevm.util, symevm.code, symevm.state, symevm.cfg, symevm.vm, symevm.mem
 import traceback
 
@@ -34,7 +33,7 @@ def dict_to_storage(items, base=symevm.state.StorageEmpty):
     return s
 
 def mem_from_str(text, base=symevm.state.MemoryEmpty):
-    b = utils.parse_as_bin(text)
+    b = symevm.util.hex_to_bytes(text)
     m = base
     for i, v in enumerate(b):
         m = z3.Store(m, z3.BitVecVal(i, 256), z3.BitVecVal(v, 8))
@@ -49,7 +48,7 @@ def get_state(items):
         balance = int(info['balance'], 0)
         nonce = int(info['nonce'], 0)
         storage = dict_to_storage(info['storage'])
-        code = symevm.code.Code(utils.parse_as_bin(info['code']))
+        code = symevm.code.Code(info['code'])
         state[addr] = symevm.state.ContractState(code=code, storage=storage, balance=balance, nonce=nonce)
     return state
 
@@ -73,7 +72,7 @@ def get_transaction_info(test):
         if k in exec_translate:
             tstate[exec_translate[k]] = z3.BitVecVal(int(v, 0), 256)
 
-    code = symevm.code.Code(utils.parse_as_bin(test['exec']['code']))
+    code = symevm.code.Code(test['exec']['code'])
     tstate['calldata'], tstate['calldatasize'] = mem_from_str(test['exec']['data'])
 
     return code, tstate

@@ -2,13 +2,17 @@ from . import util
 
 class Code:
     def __init__(self, code):
-        self._code = code
-        self._jumpdests = []
+        self._code = util.hex_to_bytes(code)
+        self._jumpdests = self._find_jumpdests()
+
+    def _find_jumpdests(self):
+        jd = []
         i = 0
-        while i < len(code):
-            if code[i] == 0x5b:
-                self._jumpdests.append(i)
-            i += util.oplen(code[i])
+        while i < len(self._code):
+            if self._code[i] == 0x5b:
+                jd.append(i)
+            i += util.oplen(self._code[i])
+        return jd
 
     def size(self):
         return len(self._code)

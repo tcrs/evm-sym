@@ -2,7 +2,6 @@ import z3
 import copy
 import collections
 from . import util, mem, vm_isa
-from ethereum import utils
 
 MemorySort = z3.ArraySort(z3.BitVecSort(256), z3.BitVecSort(8))
 StorageSort = z3.ArraySort(z3.BitVecSort(256), z3.BitVecSort(256))
@@ -259,7 +258,7 @@ def run_block(s, solver, log_trace=False):
             s.stack.append(sha3(v))
             # TODO when n == 0 or all values are concrete, simplify!
             #start, sz = as_concrete(start), as_concrete(sz)
-            #stack.append(utils.sha3_256([as_concrete(
+            #stack.append(ethereum.utils.sha3_256([as_concrete(
         elif instr.name in {'GASPRICE', 'COINBASE', 'TIMESTAMP', 'NUMBER', 'DIFFICULTY', 'GASLIMIT', 'ORIGIN'}:
             reducestack(getattr(s.transaction, instr.name.lower()))
         elif instr.name in {'BALANCE', 'BLOCKHASH', 'EXTCODESIZE'}:
