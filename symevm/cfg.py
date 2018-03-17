@@ -74,7 +74,7 @@ def to_json(root):
             elems.append({'data': dict(source=blockname, target=sname, content=str(z3.simplify(z3.And(succ.predicates))))})
     e = []
     recprint(e, root, 'r')
-    print(json.dumps(e, indent=2))
+    return e
 
 def to_dot(root, root_env=None, check_env=None, solver=None):
     def recprint(t, blockname):

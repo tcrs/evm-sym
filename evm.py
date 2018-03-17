@@ -106,7 +106,7 @@ def main(argv):
     coverage = {}
     root = symevm.cfg.get_cfg(global_state[entry_addr].code, base_t, print_trace=args.trace, verbose_coverage=args.progress, coverage=coverage)
     if args.cfg_json:
-        symevm.cfg.to_json(root)
+        print(json.dumps(symevm.cfg.to_json(root), indent=2))
     if args.cfg_dot:
         symevm.cfg.to_dot(root)
     return
