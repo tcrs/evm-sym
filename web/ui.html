@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+	<head>
+		<script src="cytoscape.min.js"></script>
+		<script src="vue-dev.js"></script>
+		<script src="ui.js"></script>
+		<link rel="stylesheet" type="text/css" href="ui.css"/>
+	</head>
+	<body>
+		<div id='container'>
+			<div id="sidebar">
+				<div id="state">
+					<div class="contract" v-for="contract in contracts" v-on:click="selectContract(contract.address, $event)">
+						<a href="#"><span class="address" v-bind:class="{selected: contract.address == selectedContract}">{{contract.address}}</span></a>
+					</div>
+				</div>
+				<div id="code">
+					<div class="line" v-for="line in code">
+						<span class="pc">{{line.pc}}</span>
+						<span class="instruction">{{line.instr}}</span>
+					</div>
+				</div>
+			</div>
+			<cfg-view v-bind:cfg="cfg"></cfg-view>
+		</div>
+	</body>
+</html>

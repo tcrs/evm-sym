@@ -1,0 +1,36 @@
+div#container {
+	width: 100%;
+	height: 95%;
+	position: absolute;
+	top: 0px;
+	left: 0px;
+}
+
+div#sidebar {
+	width: 35%;
+	height: 100%;
+	border: 1px solid;
+	float: left;
+}
+div#state {
+	width: 100%;
+	height: 20%;
+	border: 1px solid;
+	overflow: auto;
+}
+div#code {
+	width: 100%;
+	height: 80%;
+	border: 1px solid;
+	overflow: auto;
+}
+div#graph {
+	width: 62%;
+	height: 100%;
+	border: 1px solid;
+	float: right;
+}
+
+.selected {
+	font-weight: bold;
+}
