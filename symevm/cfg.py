@@ -71,7 +71,7 @@ def to_json(root):
         for i, succ in enumerate(t.successors):
             sname = blockname + '_' + str(i)
             recprint(elems, succ, sname)
-            elems.append({'data': dict(source=blockname, target=sname, content=str(z3.simplify(z3.And(succ.predicates))))})
+            elems.append({'data': dict(source=blockname, id='{}->{}'.format(blockname, sname), target=sname, content=str(z3.simplify(z3.And(succ.predicates))))})
     e = []
     recprint(e, root, 'r')
     return e
