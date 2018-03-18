@@ -1,31 +1,64 @@
-document.addEventListener('DOMContentLoaded', function() {
-	var req = new XMLHttpRequest();
-	req.open('POST', 'http://localhost:8080/start', true)
+function make_request(id, path, data, cb) {
+	var req = new XMLHttpRequest()
+	req.open('POST', 'http://localhost:8080/' + id + '/' + path, true)
+	req.setRequestHeader('Content-type', 'application/json')
 	req.onreadystatechange = function() {
 		if(req.readyState == 4) {
-			res = JSON.parse(req.responseText);
-			console.log('Got session ' + res.id)
-			window.begin_session(res.id)
+			var res = JSON.parse(req.responseText)
+			cb(res)
 		}
 	}
-	req.send(null);
-
-	window.v = new Vue({
+	req.send(JSON.stringify(data))
+}
+document.addEventListener('DOMContentLoaded', function() {
+	window.vue = new Vue({
 		'el': '#container',
-		data: { 'contracts': [], 'code': [], 'selectedContract': null, 'cfg': [] },
-		'methods': {
-			selectContract: function(address, ev) {
-				ev.stopPropagation();
-				this.selectedContract = address;
-				make_request(window.session_id, 'disassemble', {addr: address}, function(dis) {
+		data: { 'contracts': [], 'code': [], 'selectedContract': null, 'cfg': [], 'session': null },
+		mounted: function() {
+			var v = this;
+			var req = new XMLHttpRequest();
+			req.open('POST', 'http://localhost:8080/start', true)
+			req.onreadystatechange = function() {
+				if(req.readyState == 4) {
+					res = JSON.parse(req.responseText);
+					v.session = res.id;
+				}
+			}
+			req.send(null);
+		},
+		watch: {
+			'session': function(session_id) {
+				console.log('Session ' + session_id)
+				if(session_id === null) {
+					this.contracts = [];
+				}
+				else {
+					var v = this;
+					make_request(session_id, 'contracts', {}, function(o) {
+						v.contracts = []
+						for(var i = 0; i < o.length; i += 1) {
+							v.contracts.push({address: o[i]})
+						}
+					})
+				}
+			},
+			'selectedContract': function(address) {
+				var v = this;
+				make_request(v.session, 'disassemble', {addr: address}, function(dis) {
 					v.code = [];
 					for(var line of dis) {
 						v.code.push({pc: line[0], instr: line[1]});
 					}
 				});
-				make_request(window.session_id, 'cfg', {addr: address}, function(cfg) {
+				make_request(v.session, 'cfg', {addr: address}, function(cfg) {
 					v.cfg = cfg;
 				});
+			},
+		},
+		'methods': {
+			selectContract: function(address, ev) {
+				ev.stopPropagation();
+				this.selectedContract = address;
 			}
 		},
 		"components": {
@@ -74,7 +107,11 @@ document.addEventListener('DOMContentLoaded', function() {
 				watch: {
 					cfg: function(val) {
 						this.cy.json({elements: val});
-						l = this.cy.layout({'name': 'cose'});
+						l = this.cy.layout({
+							'name': 'breadthfirst',
+							'directed': true,
+							'nodeDimensionsIncludeLabels': true,
+						});
 						l.run();
 					},
 				},
@@ -82,27 +119,3 @@ document.addEventListener('DOMContentLoaded', function() {
 		}
 	})
 })
-
-function make_request(id, path, data, cb) {
-	var req = new XMLHttpRequest()
-	req.open('POST', 'http://localhost:8080/' + id + '/' + path, true)
-	req.setRequestHeader('Content-type', 'application/json')
-	req.onreadystatechange = function() {
-		if(req.readyState == 4) {
-			var res = JSON.parse(req.responseText)
-			cb(res)
-		}
-	}
-	req.send(JSON.stringify(data))
-}
-
-function begin_session(id) {
-	console.log('Session ' + id)
-	window.session_id = id;
-	make_request(id, 'state', {}, function(o) {
-		v.contracts = []
-		for(addr in o) {
-			v.contracts.push({address: addr})
-		}
-	})
-}

@@ -48,6 +48,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 for addr, info in data.items():
                     session['global_state'].setdefault(int(addr, 0), {}).update(info)
             self._send_json({addr: [] for addr, _ in session['global_state'].items()})
+        elif path == 'contracts':
+            session.setdefault('global_state', {})
+            self._send_json([hex(addr) for addr, _ in session['global_state'].items()])
         elif path == 'disassemble':
             addr = int(data['addr'], 0)
             code = session['global_state'][addr].code

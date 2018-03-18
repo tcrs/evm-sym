@@ -1,6 +1,15 @@
+html, body {
+	margin: 0;
+	height: 100%;
+	width: 100%;
+}
+div {
+	box-sizing: border-box;
+}
 div#container {
 	width: 100%;
-	height: 95%;
+	height: 100%;
+	margin: 0;
 	position: absolute;
 	top: 0px;
 	left: 0px;
@@ -18,17 +27,27 @@ div#state {
 	border: 1px solid;
 	overflow: auto;
 }
+div#graph {
+	width: 65%;
+	height: 100%;
+	float: right;
+}
+
 div#code {
 	width: 100%;
 	height: 80%;
-	border: 1px solid;
 	overflow: auto;
 }
-div#graph {
-	width: 62%;
-	height: 100%;
-	border: 1px solid;
-	float: right;
+div#code .pc {
+	display: inline-block;
+	color: gray;
+	font-weight: bold;
+	font-family: monospace;
+	min-width: 3ex;
+}
+
+div#code .instruction {
+	font-family: monospace;
 }
 
 .selected {
