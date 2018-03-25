@@ -358,7 +358,7 @@ def run_block(s, solver, log_trace=False):
             if is_concrete(call_addr):
                 s.make_child_call(addr = call_addr.as_long(), code_addr=code_addr.as_long(), caller=caller,
                     retinfo=ReturnInfo(s, s.pc + 1, out_off, out_sz, callres),
-                    callinfo=CallInfo(MemRange(s.memory, in_off, in_sz), gas, value))
+                    callinfo=CallInfo(MemRange(s.memory, in_off, in_sz), z3.BV2Int(gas), value))
                 return
             else:
                 end_trace('call', call_addr, value, gas)
