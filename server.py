@@ -3,7 +3,6 @@
 import json
 import http.server
 
-from ethereum import utils
 from symevm import util, code, state, cfg, vm
 import evm
 

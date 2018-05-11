@@ -1,9 +1,12 @@
 import sys
 import collections
-from ethereum import opcodes, utils
+from symevm import vm_isa
+
+reverse_opcodes = {op.name: n for n, op in vm_isa.opcodes.items()}
 
 def pushbytes(v):
-    be = utils.int_to_big_endian(v)
+    nbytes = (len(bin(v)) + 7) // 8
+    be = v.to_bytes(nbytes, 'big')
     n = len(be)
     if n == 0:
         # PUSH1 0
@@ -48,7 +51,7 @@ class Assembler:
                     v.refs.append(ref)
                     self.code.append(ref)
                 else:
-                    op = opcodes.reverse_opcodes[word.upper()]
+                    op = reverse_opcodes[word.upper()]
                     self.code.append(op)
 
     def assemble(self):
