@@ -41,8 +41,9 @@ def try_reach(targets, root, root_env, envstack):
     solver = z3.Solver()
     unreached_targets = []
     gadgets = []
+    initial_storage = root_env.initial_contract_state(root_env.address()).storage
     for target in targets:
-        gadgets = list(reachable(root, root_env, envstack[-1], lambda t: t.end_type in {'call', 'stop'} and t.storage is not root_env.initial_storage()))
+        gadgets = list(reachable(root, root_env, envstack[-1], lambda t: t.end_type in {'call', 'stop'} and t.storage is not initial_storage))
         solver.push()
         if is_reachable(solver, target, root_env, envstack[-1]):
             print(target)
@@ -107,26 +108,17 @@ def main(argv):
     root = symevm.cfg.get_cfg(global_state[entry_addr].code, base_t, print_trace=args.trace, verbose_coverage=args.progress, coverage=coverage)
     if args.cfg_json:
         print(json.dumps(symevm.cfg.to_json(root), indent=2))
-    if args.cfg_dot:
+    elif args.cfg_dot:
         symevm.cfg.to_dot(root)
-    return
-    if args.cfg:
-        poss_state = symevm.state.TransactionState('t', 0x1234, global_state, caller=z3.BitVecVal(args.caller, 256),
-            initial_storage_policy=symevm.state.storage_empty_policy,
-            origin=z3.BitVecVal(args.caller, 256))
-        #poss_env = Environment('t', code, address=1234, caller=z3.BitVecVal(args.caller, 256), initial_storage=StorageEmpty)
-        symevm.cfg.to_dot(code, root, base_t, poss_state, z3.Solver())
-        #symevm.cfg.to_dot(code, root)
     else:
         interestingfn = lambda t: t.end_type in {'call', 'suicide', 'stop'}
         gadgetsfn = lambda t: t.end_type in {'call', 'stop'} and t.modified_storage is not None
 
-        poss_env = Environment('t', code, caller=z3.BitVecVal(args.caller, 256))
-        poss_reachable = list(reachable(root, base_env, poss_env, interestingfn))
+        poss_env = symevm.state.TransactionState('0', entry_addr, global_state, caller=z3.BitVecVal(args.caller, 256),
+            initial_storage_policy=symevm.state.storage_any_policy)
+        poss_reachable = list(reachable(root, base_t, poss_env, interestingfn))
 
-        env0 = Environment('0', code, caller=z3.BitVecVal(args.caller, 256), initial_storage=StorageEmpty)
-
-        unreachable = try_reach(poss_reachable, root, base_env, [env0])
+        unreachable = try_reach(poss_reachable, root, base_t, [poss_env])
         for node in unreachable:
             print('could not reach: {}'.format(node))
 
