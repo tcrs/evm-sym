@@ -1,4 +1,5 @@
 import z3
+from z3.z3 import _to_expr_ref
 import collections
 
 MemorySort = z3.ArraySort(z3.BitVecSort(256), z3.BitVecSort(8))
@@ -61,6 +62,14 @@ class TransactionState:
     # also based somewhat on the z3 substitute implementation:
     # https://github.com/Z3Prover/z3/blob/master/src/ast/rewriter/expr_safe_replace.cpp
     def substitute(self, other, expr):
+        def update_term(t, args):
+            n = len(args)
+            # Need to pass an AstArray type into Z3_update_term, not a python list
+            args_ast_arr = (z3.Ast * n)()
+            for i in range(n):
+                args_ast_arr[i] = args[i].as_ast()
+            return _to_expr_ref(z3.Z3_update_term(t.ctx_ref(), t.as_ast(), n, args_ast_arr), t.ctx)
+
         cache = z3.AstMap(ctx=expr.ctx)
 
         for addr, state in self._expanded_global_state.items():
@@ -71,7 +80,14 @@ class TransactionState:
 
         fnsubs = []
         for k, v in self._cache.items():
-            if z3.is_app(v) and v.num_args() > 0:
+            if isinstance(v, mem.Memory):
+                # Uses of Memory objects will produce an expression containing
+                # the underlying array object (_mem). If required the index
+                # (_idx) will have been substituted with the actual indexing
+                # expression at that point, so we do not need to consider it
+                # here.
+                cache[v._mem] = getattr(other, k)()._mem
+            elif z3.is_app(v) and v.num_args() > 0:
                 fnsubs.append((v, getattr(other, k)()))
             else:
                 cache[v] = getattr(other, k)()
@@ -103,7 +119,10 @@ class TransactionState:
                             break
                     else:
                         # TODO only if new_args != old_args
-                        new_fn = fn(new_args)
+                        if len(new_args) != fn.arity():
+                            new_fn = update_term(n, new_args)
+                        else:
+                            new_fn = fn(*new_args)
                     cache[n] = new_fn
             else:
                 assert z3.is_quantifier(n)
