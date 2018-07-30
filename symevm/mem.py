@@ -3,11 +3,6 @@ import copy
 import collections
 from . import state
 
-# base = start of chunk in base array indices
-# coff = start of chunk in check array indices
-# length = length of chunk
-_Addr = collections.namedtuple('Addr', 'base coff length')
-
 class Memory:
     def __init__(self, base=state.MemoryEmpty, base_idx=None):
         self._mem = base
