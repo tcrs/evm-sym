@@ -79,7 +79,7 @@ def add_args(parser):
     parser.add_argument('--cfg-dot', action='store_true', help='Output full control-flow graph in graphviz format')
     parser.add_argument('--cfg-json', action='store_true', help='Output full control-flow graph in json format (suitable for cytoscape')
     parser.add_argument('--trace', action='store_true', help='Output verbose trace of execution')
-    parser.add_argument('--caller', type=lambda x: int(x, 0), help='CALLER instruction return value')
+    parser.add_argument('--caller', type=lambda x: int(x, 0), default=1234567, help='CALLER instruction return value')
 
 def load_test(filename):
     with open(filename, "r") as f:
