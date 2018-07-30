@@ -52,7 +52,11 @@ def get_transaction_info(test):
         gas = 'initial_gas')
     for k, v in test['exec'].items():
         if k in exec_translate:
-            tstate[exec_translate[k]] = z3.BitVecVal(int(v, 0), 256)
+            if k == 'gas':
+                v = z3.IntVal(int(v, 0))
+            else:
+                v = z3.BitVecVal(int(v, 0), 256)
+            tstate[exec_translate[k]] = v
 
     code = symevm.code.Code(test['exec']['code'])
     tstate['calldata'], tstate['calldatasize'] = mem_from_str(test['exec']['data'])
