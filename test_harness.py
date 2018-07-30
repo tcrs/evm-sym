@@ -5,6 +5,7 @@ import argparse
 import z3
 import symevm.util, symevm.code, symevm.state, symevm.cfg, symevm.vm, symevm.mem
 import traceback
+import load_state
 
 def all_json_files(directory):
     for top, _, files in os.walk(directory):
@@ -26,31 +27,12 @@ def tests_from_files(filenames):
         for name, test in loaded.items():
             yield '{}:{}'.format(filename, name), test
 
-def dict_to_storage(items, base=symevm.state.StorageEmpty):
-    s = base
-    for k, v in items.items():
-        s = z3.Store(s, z3.BitVecVal(int(k, 0), 256), z3.BitVecVal(int(v, 0), 256))
-    return s
-
 def mem_from_str(text, base=symevm.state.MemoryEmpty):
     b = symevm.util.hex_to_bytes(text)
     m = base
     for i, v in enumerate(b):
         m = z3.Store(m, z3.BitVecVal(i, 256), z3.BitVecVal(v, 8))
     return symevm.mem.Memory(base=m), len(b)
-
-def get_state(items):
-    state = {}
-    for addr, info in items.items():
-        unknown_keys = set(info.keys()) - {'balance', 'code', 'nonce', 'storage'}
-        if unknown_keys:
-            raise NotImplementedError('Unknown contract state keys ' + str(unknown_keys))
-        balance = int(info['balance'], 0)
-        nonce = int(info['nonce'], 0)
-        storage = dict_to_storage(info['storage'])
-        code = symevm.code.Code(info['code'])
-        state[addr] = symevm.state.ContractState(code=code, storage=storage, balance=balance, nonce=nonce)
-    return state
 
 def get_transaction_info(test):
     env_translate = dict(
@@ -87,7 +69,7 @@ def get_cfg_leaves(leaves, node):
 def run_test(args, name, test):
     print(name)
 
-    global_state = get_state(test['pre'])
+    global_state = load_state.get_state(test['pre'])
     addr = int(test['exec']['address'], 0)
     code, tstate = get_transaction_info(test)
 

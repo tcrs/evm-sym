@@ -6,6 +6,7 @@ import argparse
 import collections
 import symevm.vm, symevm.util, symevm.bb, symevm.cfg, symevm.state, symevm.code
 import assemble
+import load_state
 
 MemorySort = z3.ArraySort(z3.BitVecSort(256), z3.BitVecSort(8))
 StorageSort = z3.ArraySort(z3.BitVecSort(256), z3.BitVecSort(256))
@@ -73,25 +74,24 @@ def try_reach(targets, root, root_env, envstack):
     return unreached_targets
 
 def add_args(parser):
-    parser.add_argument('code', default='-', help='EVM code as a hex string')
+    parser.add_argument('code', default='-', help='Description of EVM state as JSON')
     parser.add_argument('--progress', action='store_true', help='Verbose progress output during CFG trace')
     parser.add_argument('--cfg-dot', action='store_true', help='Output full control-flow graph in graphviz format')
     parser.add_argument('--cfg-json', action='store_true', help='Output full control-flow graph in json format (suitable for cytoscape')
     parser.add_argument('--trace', action='store_true', help='Output verbose trace of execution')
     parser.add_argument('--caller', type=lambda x: int(x, 0), help='CALLER instruction return value')
 
-def load_state(filename):
+def load_test(filename):
     with open(filename, "r") as f:
         raw = json.loads(f.read())
     state = {}
     entry_addr = None
     if 'contracts' in raw:
-        for addr, info in raw['contracts'].items():
-            if entry_addr is None:
-                entry_addr = int(addr, 0)
-            state[int(addr, 0)] = symevm.state.ContractState(symevm.code.Code(info['code']))
+        state = load_state.get_state(raw['contracts'])
     if 'entry' in raw:
         entry_addr = int(raw['entry'], 0)
+    else:
+        entry_addr = min(state.keys())
     return state, entry_addr
 
 def main(argv):
@@ -99,7 +99,7 @@ def main(argv):
     add_args(p)
     args = p.parse_args(argv)
 
-    global_state, entry_addr = load_state(args.code)
+    global_state, entry_addr = load_test(args.code)
 
     base_t = symevm.state.TransactionState('base', entry_addr, global_state,
         initial_storage_policy=symevm.state.storage_any_policy)
